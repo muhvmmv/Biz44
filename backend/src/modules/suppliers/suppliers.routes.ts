@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { CrudService } from '../../services/crud.service';
 import { PrismaClient } from '@prisma/client';
@@ -9,8 +9,8 @@ const supplierService = new CrudService('supplier');
 
 router.use(authenticate);
 
-// ---------- SUPPLIER SUMMARY (must be ABOVE /:id) ----------
-router.get('/:id/summary', async (req, res, next) => {
+// Summary (must come BEFORE /:id)
+router.get('/:id/summary', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const companyId = req.user?.companyId!;
     const supplier = await prisma.supplier.findFirst({
@@ -18,7 +18,6 @@ router.get('/:id/summary', async (req, res, next) => {
     });
     if (!supplier) return res.status(404).json({ success: false, message: 'Not found' });
 
-    // For now, use all 'receipt' stock movements (until supplier-per-movement is tracked)
     const receipts = await prisma.stockMovement.findMany({
       where: { companyId, type: 'receipt' },
       orderBy: { createdAt: 'desc' },
@@ -26,7 +25,7 @@ router.get('/:id/summary', async (req, res, next) => {
       take: 100,
     });
 
-    const totalPurchased = receipts.reduce((s, r) => s + Math.abs(r.quantity), 0);
+    const totalPurchased = receipts.reduce((s: number, r: { quantity: number }) => s + Math.abs(r.quantity), 0);
 
     res.json({
       success: true,
@@ -39,16 +38,14 @@ router.get('/:id/summary', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ---------- LIST ----------
-router.get('/', async (req, res, next) => {
+router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const suppliers = await supplierService.findMany({ companyId: req.user?.companyId });
     res.json({ success: true, data: suppliers });
   } catch (err) { next(err); }
 });
 
-// ---------- CREATE ----------
-router.post('/', async (req, res, next) => {
+router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const companyId = req.user?.companyId;
     const supplier = await supplierService.create({ ...req.body, companyId });
@@ -56,24 +53,21 @@ router.post('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ---------- GET ONE ----------
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const supplier = await supplierService.findById(req.params.id);
     res.json({ success: true, data: supplier });
   } catch (err) { next(err); }
 });
 
-// ---------- UPDATE ----------
-router.put('/:id', async (req, res, next) => {
+router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const supplier = await supplierService.update(req.params.id, req.body);
     res.json({ success: true, data: supplier });
   } catch (err) { next(err); }
 });
 
-// ---------- DELETE ----------
-router.delete('/:id', async (req, res, next) => {
+router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     await supplierService.delete(req.params.id);
     res.json({ success: true });

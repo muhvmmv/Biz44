@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { CrudService } from '../../services/crud.service';
 import { PrismaClient } from '@prisma/client';
@@ -9,8 +9,8 @@ const customerService = new CrudService('customer');
 
 router.use(authenticate);
 
-// ---------- CUSTOMER SUMMARY (must be ABOVE /:id) ----------
-router.get('/:id/summary', async (req, res, next) => {
+// Summary (must come BEFORE /:id)
+router.get('/:id/summary', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const companyId = req.user?.companyId!;
     const customer = await prisma.customer.findFirst({
@@ -26,8 +26,8 @@ router.get('/:id/summary', async (req, res, next) => {
 
     const totalSales = invoices
       .filter((i) => i.status !== 'draft' && i.status !== 'cancelled')
-      .reduce((s, i) => s + i.total, 0);
-    const totalPaid = invoices.reduce((s, i) => s + i.amountPaid, 0);
+      .reduce((s: number, i) => s + i.total, 0);
+    const totalPaid = invoices.reduce((s: number, i) => s + i.amountPaid, 0);
     const outstanding = totalSales - totalPaid;
 
     const payments = invoices
@@ -55,16 +55,14 @@ router.get('/:id/summary', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ---------- LIST ----------
-router.get('/', async (req, res, next) => {
+router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const customers = await customerService.findMany({ companyId: req.user?.companyId });
     res.json({ success: true, data: customers });
   } catch (err) { next(err); }
 });
 
-// ---------- CREATE ----------
-router.post('/', async (req, res, next) => {
+router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const companyId = req.user?.companyId;
     const customer = await customerService.create({ ...req.body, companyId });
@@ -72,24 +70,21 @@ router.post('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ---------- GET ONE ----------
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const customer = await customerService.findById(req.params.id);
     res.json({ success: true, data: customer });
   } catch (err) { next(err); }
 });
 
-// ---------- UPDATE ----------
-router.put('/:id', async (req, res, next) => {
+router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const customer = await customerService.update(req.params.id, req.body);
     res.json({ success: true, data: customer });
   } catch (err) { next(err); }
 });
 
-// ---------- DELETE ----------
-router.delete('/:id', async (req, res, next) => {
+router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     await customerService.delete(req.params.id);
     res.json({ success: true });

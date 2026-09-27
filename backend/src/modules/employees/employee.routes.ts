@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { CrudService } from '../../services/crud.service';
 import { PrismaClient } from '@prisma/client';
@@ -9,8 +9,8 @@ const employeeService = new CrudService('employee');
 
 router.use(authenticate);
 
-// ---------- EMPLOYEE SUMMARY (must be ABOVE /:id) ----------
-router.get('/:id/summary', async (req, res, next) => {
+// Summary (must come BEFORE /:id)
+router.get('/:id/summary', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const companyId = req.user?.companyId!;
     const employee = await prisma.employee.findFirst({
@@ -46,16 +46,14 @@ router.get('/:id/summary', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ---------- LIST ----------
-router.get('/', async (req, res, next) => {
+router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const employees = await employeeService.findMany({ companyId: req.user?.companyId });
     res.json({ success: true, data: employees });
   } catch (err) { next(err); }
 });
 
-// ---------- CREATE ----------
-router.post('/', async (req, res, next) => {
+router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const companyId = req.user?.companyId;
     const employee = await employeeService.create({ ...req.body, companyId });
@@ -63,24 +61,21 @@ router.post('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ---------- GET ONE ----------
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const employee = await employeeService.findById(req.params.id);
     res.json({ success: true, data: employee });
   } catch (err) { next(err); }
 });
 
-// ---------- UPDATE ----------
-router.put('/:id', async (req, res, next) => {
+router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const employee = await employeeService.update(req.params.id, req.body);
     res.json({ success: true, data: employee });
   } catch (err) { next(err); }
 });
 
-// ---------- DELETE ----------
-router.delete('/:id', async (req, res, next) => {
+router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     await employeeService.delete(req.params.id);
     res.json({ success: true });

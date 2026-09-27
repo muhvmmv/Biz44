@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { PrismaClient } from '@prisma/client';
 
@@ -7,8 +7,8 @@ const router = Router();
 
 router.use(authenticate);
 
-// List movements (optionally filtered by product)
-router.get('/', async (req, res, next) => {
+// List movements
+router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { productId } = req.query;
     const where: any = { companyId: req.user?.companyId };
@@ -25,14 +25,14 @@ router.get('/', async (req, res, next) => {
 });
 
 // Receive inventory (bulk)
-router.post('/receive', async (req, res, next) => {
+router.post('/receive', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const companyId = req.user!.companyId;
     const { items, reference, notes } = req.body as {
       items: { productId: string; quantity: number; unitCost: number }[];
       reference?: string;
       notes?: string;
     };
-    const companyId = req.user?.companyId;
 
     const results = await prisma.$transaction(async (tx) => {
       const created = [];
@@ -71,16 +71,18 @@ router.post('/receive', async (req, res, next) => {
 });
 
 // Adjust stock manually
-router.post('/adjust', async (req, res, next) => {
+router.post('/adjust', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const companyId = req.user!.companyId;
     const { productId, quantity, notes } = req.body;
-    const companyId = req.user?.companyId;
 
     const product = await prisma.product.findUnique({ where: { id: productId } });
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
 
     const newBalance = product.quantity + quantity;
-    if (newBalance < 0) return res.status(400).json({ success: false, message: 'Insufficient stock' });
+    if (newBalance < 0) {
+      return res.status(400).json({ success: false, message: 'Insufficient stock' });
+    }
 
     await prisma.product.update({
       where: { id: productId },
