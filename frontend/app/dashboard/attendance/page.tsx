@@ -128,35 +128,35 @@ export default function AttendancePage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-border-soft">
             <div className="p-6 border-b border-border-soft">
-              <h2 className="text-lg font-bold text-navy">Mark Attendance</h2>
+              <h2 className="text-lg font-bold text-charcoal">Mark Attendance</h2>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Employee</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Employee</label>
                 <select required value={form.employeeId}
                   onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale">
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand">
                   <option value="">Select employee</option>
                   {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.firstName} {emp.lastName}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Date</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Date</label>
                 <input type="date" required value={form.date}
                   onChange={(e) => setForm({ ...form, date: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" />
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Status</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Status</label>
                 <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale">
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand">
                   {statuses.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Notes</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Notes</label>
                 <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" />
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>

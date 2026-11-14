@@ -11,8 +11,8 @@ export default function AuthLayout({ children, title, subtitle, footer }: AuthLa
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 py-12 bg-ivory">
       <div className="mb-8 text-center">
-        <Link href="/" className="inline-flex items-center gap-2 font-bold text-xl text-navy">
-          <span className="w-8 h-8 bg-rose-vale rounded-lg flex items-center justify-center text-white text-sm font-extrabold">
+        <Link href="/" className="inline-flex items-center gap-2 font-bold text-xl text-charcoal">
+          <span className="w-8 h-8 bg-brand rounded-lg flex items-center justify-center text-white text-sm font-extrabold">
             B
           </span>
           Biz44

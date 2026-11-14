@@ -13,7 +13,7 @@ import ReportNotes from "@/components/reports/ReportNotes";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useLocationVersion } from "@/hooks/useLocationRefetch";
 
-const COLORS = ["#AB6B73", "#243447", "#527A9E", "#4F8068", "#C49A52", "#B96F5D", "#824C54", "#6B6563"];
+const COLORS = ["#F05A28", "#1C1C1F", "#3B82F6", "#16A34A", "#A1A1AA", "#0D9488", "#B93D0C", "#66666E"];
 
 export default function ReportsPage() {
   const { format } = useCurrency();

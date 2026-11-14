@@ -87,7 +87,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
   if (locationLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-ivory">
-        <div className="animate-spin h-8 w-8 border-4 border-rose-vale border-t-transparent rounded-full" />
+        <div className="animate-spin h-8 w-8 border-4 border-brand border-t-transparent rounded-full" />
       </div>
     );
   }
@@ -102,13 +102,13 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-64 bg-navy text-white flex flex-col transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:z-auto lg:h-screen ${
+        className={`fixed inset-y-0 left-0 z-50 w-64 bg-charcoal text-white flex flex-col transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:z-auto lg:h-screen ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         <div className="flex h-16 items-center justify-between px-6 border-b border-white/10 shrink-0">
           <Link href="/dashboard" className="flex items-center gap-2 font-bold text-xl text-white">
-            <span className="w-7 h-7 bg-rose-vale rounded-lg flex items-center justify-center text-white text-xs font-extrabold">
+            <span className="w-7 h-7 bg-brand rounded-lg flex items-center justify-center text-white text-xs font-extrabold">
               B
             </span>
             Biz44
@@ -155,7 +155,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
                             onClick={() => setSidebarOpen(false)}
                             className={`block rounded-lg px-3 py-2 text-sm transition-colors ${
                               isActive
-                                ? "bg-rose-vale text-white font-medium"
+                                ? "bg-brand-light text-brand-dark font-medium"
                                 : "text-white/60 hover:bg-white/5 hover:text-white"
                             }`}
                           >
@@ -177,7 +177,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
                 onClick={() => setSidebarOpen(false)}
                 className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                   isActive
-                    ? "bg-rose-vale text-white"
+                    ? "bg-brand-light text-brand-dark"
                     : "text-white/70 hover:bg-white/5 hover:text-white"
                 }`}
               >
@@ -190,7 +190,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
 
         <div className="border-t border-white/10 p-4 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-rose-vale text-white flex items-center justify-center font-semibold text-sm">
+            <div className="w-8 h-8 rounded-full bg-brand-dark text-white flex items-center justify-center font-semibold text-sm">
               {user?.firstName?.[0]}
               {user?.lastName?.[0]}
             </div>
@@ -202,7 +202,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
             </div>
             <button
               onClick={() => logout()}
-              className="p-1.5 text-white/50 hover:text-rose-vale transition-colors"
+              className="p-1.5 text-white/50 hover:text-brand-dark transition-colors"
               title="Sign out"
             >
               <LogOut size={16} />
@@ -224,7 +224,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
             <LocationSelector />
             <Link
               href="/dashboard/settings"
-              className="h-8 w-8 rounded-full bg-navy text-white flex items-center justify-center text-xs font-bold hover:bg-navy-dark transition-colors"
+              className="h-8 w-8 rounded-full bg-charcoal text-white flex items-center justify-center text-xs font-bold hover:bg-charcoal-dark transition-colors"
               title="Settings"
             >
               {user?.firstName?.[0]}

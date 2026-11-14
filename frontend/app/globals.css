@@ -1,36 +1,39 @@
 @import "tailwindcss";
 
 @theme {
-  /* Biz44 Brand Palette */
-  --color-rose-vale: #AB6B73;
-  --color-rose-dark: #824C54;
-  --color-rose-light: #F1E1E3;
+  /* ===== Biz44 brand =====
+     brand        bright orange — accents only: active indicators, focus rings,
+                  progress, chart highlight, logo. Not for small text on white.
+     brand-dark   deep orange — orange text and links (5.6:1 on white).
+     brand-light  orange tint — selected/active backgrounds.
+     charcoal     near-black — primary buttons, active pills, headings. */
+  --color-brand: #F05A28;
+  --color-brand-dark: #B93D0C;
+  --color-brand-light: #FFF1EA;
 
-  --color-navy: #243447;
-  --color-navy-dark: #1A2735;
-  --color-navy-light: #E7ECF1;
+  --color-charcoal: #1C1C1F;
+  --color-charcoal-dark: #0B0B0D;
+  --color-charcoal-light: #EFEFF1;
 
-  --color-ivory: #FAF8F5;
-  --color-border-soft: #E5DFDC;
+  --color-ivory: #F7F7F8;
+  --color-border-soft: #E6E6EA;
 
-  --color-ink: #252525;
-  --color-ink-soft: #6B6563;
+  --color-ink: #1C1C1F;
+  --color-ink-soft: #66666E;
 
-  /* Semantic */
-  --color-success: #4F8068;
-  --color-warning: #C49A52;
-  --color-danger: #B94A48;
-  --color-info: #527A9E;
-  --color-gold: #C49A52;
-  --color-terracotta: #B96F5D;
+  /* Semantic (kept distinct from the brand orange) */
+  --color-success: #15803D;
+  --color-warning: #A16207;
+  --color-danger: #B91C1C;
+  --color-info: #1D4ED8;
 
-  /* Chart palette */
-  --color-chart-1: #AB6B73;
-  --color-chart-2: #243447;
-  --color-chart-3: #527A9E;
-  --color-chart-4: #4F8068;
-  --color-chart-5: #C49A52;
-  --color-chart-6: #B96F5D;
+  /* Chart palette — brand first, then hues that stay distinct from orange */
+  --color-chart-1: #F05A28;
+  --color-chart-2: #1C1C1F;
+  --color-chart-3: #3B82F6;
+  --color-chart-4: #16A34A;
+  --color-chart-5: #A1A1AA;
+  --color-chart-6: #0D9488;
 }
 
 @layer base {
@@ -83,8 +86,8 @@
   }
 }
 
-/* Focus ring uses Rose Vale */
+/* Focus ring uses the brand orange */
 *:focus-visible {
-  outline: 2px solid var(--color-rose-vale);
+  outline: 2px solid var(--color-brand);
   outline-offset: 2px;
 }

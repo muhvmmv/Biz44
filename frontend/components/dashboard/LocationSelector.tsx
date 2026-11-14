@@ -19,7 +19,7 @@ export default function LocationSelector() {
   }, []);
 
   if (loading) {
-    return <div className="h-9 w-40 rounded-lg bg-navy-light animate-pulse" />;
+    return <div className="h-9 w-40 rounded-lg bg-charcoal-light animate-pulse" />;
   }
 
 
@@ -29,9 +29,9 @@ export default function LocationSelector() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 px-3 py-2 rounded-lg bg-ivory border border-border-soft text-sm text-ink hover:border-rose-vale transition"
+        className="flex items-center gap-2 px-3 py-2 rounded-lg bg-ivory border border-border-soft text-sm text-ink hover:border-brand transition"
       >
-        <MapPin size={14} className="text-rose-vale" />
+        <MapPin size={14} className="text-brand-dark" />
         <span className="font-medium">{label}</span>
         <ChevronDown size={14} className="text-ink-soft" />
       </button>
@@ -45,7 +45,7 @@ export default function LocationSelector() {
           <button
             onClick={() => { setActiveLocation("all"); setOpen(false); window.location.reload();}}
             className={`w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-ivory ${
-              activeLocationId === "all" ? "text-rose-vale font-medium" : "text-ink"
+              activeLocationId === "all" ? "text-brand-dark font-medium" : "text-ink"
             }`}
           >
             <span>All Branches</span>
@@ -57,7 +57,7 @@ export default function LocationSelector() {
               key={loc.id}
               onClick={() => { setActiveLocation(loc.id); setOpen(false); }}
               className={`w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-ivory ${
-                activeLocationId === loc.id ? "text-rose-vale font-medium" : "text-ink"
+                activeLocationId === loc.id ? "text-brand-dark font-medium" : "text-ink"
               }`}
             >
               <div className="text-left">
@@ -72,7 +72,7 @@ export default function LocationSelector() {
             <Link
               href="/dashboard/settings/locations"
               onClick={() => setOpen(false)}
-              className="flex items-center gap-2 px-3 py-2 text-sm text-ink-soft hover:bg-ivory hover:text-rose-vale"
+              className="flex items-center gap-2 px-3 py-2 text-sm text-ink-soft hover:bg-ivory hover:text-brand-dark"
             >
               <Plus size={14} /> Manage Branches
             </Link>

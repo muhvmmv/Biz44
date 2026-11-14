@@ -117,7 +117,7 @@ export default function ReportNotes() {
       <CardHeader>
         <div>
           <CardTitle className="flex items-center gap-2">
-            <StickyNote className="w-5 h-5 text-rose-vale" /> Report Notes
+            <StickyNote className="w-5 h-5 text-brand-dark" /> Report Notes
           </CardTitle>
           <p className="text-sm text-ink-soft mt-1">
             Log explanations, exceptions, or one-off events.
@@ -132,7 +132,7 @@ export default function ReportNotes() {
           <button
             onClick={() => setFilter("")}
             className={`px-3 py-1 rounded-full text-xs font-medium border transition ${
-              filter === "" ? "bg-rose-vale text-white border-rose-vale" : "border-border-soft text-ink-soft hover:border-rose-vale"
+              filter === "" ? "bg-charcoal text-white border-brand" : "border-border-soft text-ink-soft hover:border-brand"
             }`}
           >
             All
@@ -142,7 +142,7 @@ export default function ReportNotes() {
               key={c.value}
               onClick={() => setFilter(c.value)}
               className={`px-3 py-1 rounded-full text-xs font-medium border transition ${
-                filter === c.value ? "bg-rose-vale text-white border-rose-vale" : "border-border-soft text-ink-soft hover:border-rose-vale"
+                filter === c.value ? "bg-charcoal text-white border-brand" : "border-border-soft text-ink-soft hover:border-brand"
               }`}
             >
               {c.label}
@@ -160,7 +160,7 @@ export default function ReportNotes() {
         ) : (
           <div className="space-y-3">
             {notes.map((note) => (
-              <div key={note.id} className="border border-border-soft rounded-lg p-4 hover:border-rose-vale transition group">
+              <div key={note.id} className="border border-border-soft rounded-lg p-4 hover:border-brand transition group">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -173,7 +173,7 @@ export default function ReportNotes() {
                     <p className="text-sm text-ink-soft whitespace-pre-wrap">{note.content}</p>
                   </div>
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => openEdit(note)} className="p-1.5 text-ink-soft hover:text-rose-vale transition" title="Edit">
+                    <button onClick={() => openEdit(note)} className="p-1.5 text-ink-soft hover:text-brand-dark transition" title="Edit">
                       <Pencil size={14} />
                     </button>
                     <button onClick={() => handleDelete(note.id)} className="p-1.5 text-ink-soft hover:text-danger transition" title="Delete">
@@ -191,35 +191,35 @@ export default function ReportNotes() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg border border-border-soft">
             <div className="p-6 border-b border-border-soft flex items-center justify-between">
-              <h2 className="text-lg font-bold text-navy">{editing ? "Edit Note" : "Add Report Note"}</h2>
+              <h2 className="text-lg font-bold text-charcoal">{editing ? "Edit Note" : "Add Report Note"}</h2>
               <button onClick={() => setShowForm(false)} className="p-1 text-ink-soft hover:text-ink">
                 <X size={18} />
               </button>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Title *</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Title *</label>
                 <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" required />
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" required />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1 text-navy">Category</label>
+                  <label className="block text-sm font-medium mb-1 text-charcoal">Category</label>
                   <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}
-                    className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale">
+                    className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand">
                     {categories.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1 text-navy">Date</label>
+                  <label className="block text-sm font-medium mb-1 text-charcoal">Date</label>
                   <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })}
-                    className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" />
+                    className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Note *</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Note *</label>
                 <textarea rows={5} value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" required />
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" required />
               </div>
               {error && <p className="text-danger text-sm">{error}</p>}
               <div className="flex justify-end gap-2 pt-2">

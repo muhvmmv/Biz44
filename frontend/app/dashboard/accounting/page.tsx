@@ -66,14 +66,14 @@ export default function AccountsPage() {
           </div>
 
           <div>
-            <h3 className="font-semibold text-navy mb-3">Assets</h3>
+            <h3 className="font-semibold text-charcoal mb-3">Assets</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {assetAccounts.map((a) => {
                 const Icon = iconFor(a.name);
                 return (
                   <Card key={a.id}>
                     <CardContent className="p-5 flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-rose-light text-rose-vale flex items-center justify-center">
+                      <div className="w-12 h-12 rounded-xl bg-brand-light text-brand-dark flex items-center justify-center">
                         <Icon size={22} />
                       </div>
                       <div className="flex-1">
@@ -89,7 +89,7 @@ export default function AccountsPage() {
 
           {liabilityAccounts.length > 0 && (
             <div>
-              <h3 className="font-semibold text-navy mb-3">Liabilities</h3>
+              <h3 className="font-semibold text-charcoal mb-3">Liabilities</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {liabilityAccounts.map((a) => {
                   const Icon = iconFor(a.name);

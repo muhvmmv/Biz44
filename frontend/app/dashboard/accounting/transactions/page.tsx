@@ -52,8 +52,8 @@ export default function TransactionsPage() {
             onClick={() => setFilter(t)}
             className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${
               filter === t
-                ? "bg-rose-vale text-white"
-                : "bg-white border border-border-soft text-ink-soft hover:border-rose-vale"
+                ? "bg-charcoal text-white"
+                : "bg-white border border-border-soft text-ink-soft hover:border-brand"
             }`}
           >
             {t === "" ? "All" : t.charAt(0).toUpperCase() + t.slice(1)}

@@ -54,7 +54,7 @@ export default function OnboardingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-rose-light via-ivory to-navy-light flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-brand-light via-ivory to-charcoal-light flex items-center justify-center p-4">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -65,7 +65,7 @@ export default function OnboardingPage() {
             <div
               key={n}
               className={`flex-1 h-1.5 rounded-full transition-colors ${
-                n <= step ? "bg-rose-vale" : "bg-navy-light"
+                n <= step ? "bg-brand" : "bg-charcoal-light"
               }`}
             />
           ))}
@@ -85,11 +85,11 @@ export default function OnboardingPage() {
                   onClick={() => setBusinessType(value)}
                   className={`p-4 rounded-xl border-2 transition-all ${
                     businessType === value
-                      ? "border-rose-vale bg-rose-light"
-                      : "border-border-soft hover:border-rose-vale"
+                      ? "border-brand bg-brand-light"
+                      : "border-border-soft hover:border-brand"
                   }`}
                 >
-                  <Icon className={`w-6 h-6 mx-auto mb-2 ${businessType === value ? "text-rose-vale" : "text-ink-soft"}`} />
+                  <Icon className={`w-6 h-6 mx-auto mb-2 ${businessType === value ? "text-brand-dark" : "text-ink-soft"}`} />
                   <span className="text-sm font-medium text-ink">{label}</span>
                 </button>
               ))}
@@ -107,31 +107,31 @@ export default function OnboardingPage() {
 
             <div className="space-y-5 mt-8">
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">
+                <label className="block text-sm font-medium mb-1 text-charcoal">
                   Industry / niche <span className="text-ink-soft">(optional)</span>
                 </label>
                 <input
                   value={industry}
                   onChange={(e) => setIndustry(e.target.value)}
                   placeholder="e.g. Fashion, Electronics, Consulting"
-                  className="w-full rounded-lg border border-border-soft bg-white px-4 py-2.5 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                  className="w-full rounded-lg border border-border-soft bg-white px-4 py-2.5 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-brand"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Country</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Country</label>
                 <input
                   value={country}
                   onChange={(e) => setCountry(e.target.value)}
                   placeholder="e.g. Nigeria, United States"
-                  className="w-full rounded-lg border border-border-soft bg-white px-4 py-2.5 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                  className="w-full rounded-lg border border-border-soft bg-white px-4 py-2.5 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-brand"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Currency</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Currency</label>
                 <select
                   value={currency}
                   onChange={(e) => setCurrency(e.target.value)}
-                  className="w-full rounded-lg border border-border-soft bg-white px-4 py-2.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                  className="w-full rounded-lg border border-border-soft bg-white px-4 py-2.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
                 >
                   {CURRENCY_CODES.map((c) => (
                     <option key={c} value={c}>{c}</option>

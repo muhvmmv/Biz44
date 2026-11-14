@@ -73,7 +73,7 @@ export default function SuppliersPage() {
 
       <input type="text" placeholder="Search by name or email..."
         value={search} onChange={(e) => setSearch(e.target.value)}
-        className="w-full sm:w-80 rounded-lg border border-border-soft bg-white px-4 py-2.5 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-rose-vale" />
+        className="w-full sm:w-80 rounded-lg border border-border-soft bg-white px-4 py-2.5 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-brand" />
 
       <Card>
         <CardContent className="p-0">
@@ -101,7 +101,7 @@ export default function SuppliersPage() {
                   {filtered.map((s) => (
                     <tr key={s.id} className="hover:bg-ivory">
                       <td className="px-6 py-4">
-                        <Link href={`/dashboard/suppliers/${s.id}`} className="font-medium text-rose-vale hover:underline">
+                        <Link href={`/dashboard/suppliers/${s.id}`} className="font-medium text-brand-dark hover:underline">
                           {s.name}
                         </Link>
                       </td>
@@ -110,7 +110,7 @@ export default function SuppliersPage() {
                       <td className="px-6 py-4 text-ink-soft">{s.address || "—"}</td>
                       <td className="px-6 py-4">
                         <div className="flex gap-2">
-                          <button onClick={() => openEdit(s)} className="p-1 text-ink-soft hover:text-rose-vale transition"><Pencil size={16} /></button>
+                          <button onClick={() => openEdit(s)} className="p-1 text-ink-soft hover:text-brand-dark transition"><Pencil size={16} /></button>
                           <button onClick={() => handleDelete(s.id)} className="p-1 text-ink-soft hover:text-danger transition"><Trash2 size={16} /></button>
                         </div>
                       </td>
@@ -127,28 +127,28 @@ export default function SuppliersPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg border border-border-soft">
             <div className="p-6 border-b border-border-soft">
-              <h2 className="text-lg font-bold text-navy">{editing ? "Edit Supplier" : "New Supplier"}</h2>
+              <h2 className="text-lg font-bold text-charcoal">{editing ? "Edit Supplier" : "New Supplier"}</h2>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Name</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Name</label>
                 <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" />
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Email</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Email</label>
                 <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" />
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Phone</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Phone</label>
                 <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" />
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Address</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Address</label>
                 <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" />
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>

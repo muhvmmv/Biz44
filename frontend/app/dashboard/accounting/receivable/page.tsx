@@ -58,7 +58,7 @@ export default function ReceivablePage() {
             </CardContent></Card>
             <Card><CardContent className="p-5">
               <p className="text-sm text-ink-soft">31–60 days</p>
-              <p className="text-2xl font-bold mt-1 text-terracotta">{format(data.summary.days60)}</p>
+              <p className="text-2xl font-bold mt-1 text-orange-700">{format(data.summary.days60)}</p>
             </CardContent></Card>
             <Card><CardContent className="p-5">
               <p className="text-sm text-ink-soft">60+ days</p>
@@ -89,7 +89,7 @@ export default function ReceivablePage() {
                       {data.rows.map((r) => (
                         <tr key={r.id} className="hover:bg-ivory">
                           <td className="px-6 py-3">
-                            <Link href={`/dashboard/invoices/${r.id}`} className="font-medium text-rose-vale hover:underline">
+                            <Link href={`/dashboard/invoices/${r.id}`} className="font-medium text-brand-dark hover:underline">
                               {r.invoiceNumber}
                             </Link>
                           </td>

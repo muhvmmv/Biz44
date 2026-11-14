@@ -83,7 +83,7 @@ export default function ProfitLossPage() {
                       <span className="text-ink">{format(e.amount)}</span>
                     </div>
                     <div className="h-2 bg-ivory rounded-full overflow-hidden">
-                      <div className="h-full bg-rose-vale rounded-full" style={{ width: `${pct}%` }} />
+                      <div className="h-full bg-brand rounded-full" style={{ width: `${pct}%` }} />
                     </div>
                   </div>
                 );

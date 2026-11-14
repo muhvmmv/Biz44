@@ -58,13 +58,13 @@ interface RecentInvoice {
 }
 
 const CHART = {
-  revenue: "#AB6B73",
+  revenue: "#F05A28",
   profit: "#4F8068",
   loss: "#B94A48",
-  expenses: "#F97316",
+  expenses: "#A1A1AA",
 };
 
-const PIE_COLORS = ["#AB6B73", "#243447", "#527A9E", "#4F8068", "#C49A52", "#B96F5D"];
+const PIE_COLORS = ["#F05A28", "#1C1C1F", "#3B82F6", "#16A34A", "#A1A1AA", "#0D9488"];
 
 function formatCompact(value: number, currency: string): string {
   const symbol =
@@ -103,7 +103,6 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
 
     Promise.all([
       apiFetch<{ success: boolean; data: DashboardSummary }>("/dashboard/summary"),
@@ -141,8 +140,11 @@ export default function DashboardPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <select
             value={range}
-            onChange={(e) => setRange(Number(e.target.value))}
-            className="border border-border-soft rounded-lg px-3 py-2 text-sm bg-white text-navy focus:outline-none focus:ring-2 focus:ring-rose-vale"
+            onChange={(e) => {
+              setLoading(true);
+              setRange(Number(e.target.value));
+            }}
+            className="border border-border-soft rounded-lg px-3 py-2 text-sm bg-white text-charcoal focus:outline-none focus:ring-2 focus:ring-brand"
           >
             <option value={1}>This month</option>
             <option value={3}>Last 3 months</option>
@@ -182,7 +184,7 @@ export default function DashboardPage() {
               change={`${summary.grossMargin.toFixed(1)}% gross margin`}
               trend={summary.grossProfit >= 0 ? "up" : "down"}
               icon={<TrendingUp className="w-5 h-5" />}
-              accent="navy"
+              accent="charcoal"
               href="/dashboard/accounting/profit-loss"
             />
             <KpiCard
@@ -238,12 +240,12 @@ export default function DashboardPage() {
                       <LabelList
                         dataKey="revenue"
                         position="top"
-                        formatter={(v: number) => formatCompact(v, currency)}
+                        formatter={(v) => formatCompact(Number(v), currency)}
                         style={{ fontSize: 10, fill: "#6B6563", fontWeight: 600 }}
                       />
                     </Bar>
 
-                    <Bar dataKey="netProfit" radius={[6, 6, 0, 0]} name="Net Profit">
+                    <Bar dataKey="netProfit" fill={CHART.profit} radius={[6, 6, 0, 0]} name="Net Profit">
                       {chartData.map((entry, i) => (
                         <Cell
                           key={i}
@@ -253,7 +255,7 @@ export default function DashboardPage() {
                       <LabelList
                         dataKey="netProfit"
                         position="top"
-                        formatter={(v: number) => formatCompact(v, currency)}
+                        formatter={(v) => formatCompact(Number(v), currency)}
                         style={{ fontSize: 10, fill: "#6B6563", fontWeight: 600 }}
                       />
                     </Bar>
@@ -262,7 +264,7 @@ export default function DashboardPage() {
                       <LabelList
                         dataKey="opex"
                         position="top"
-                        formatter={(v: number) => formatCompact(v, currency)}
+                        formatter={(v) => formatCompact(Number(v), currency)}
                         style={{ fontSize: 10, fill: "#6B6563", fontWeight: 600 }}
                       />
                     </Bar>
@@ -388,15 +390,15 @@ interface KpiCardProps {
   trend: "up" | "down";
   icon: React.ReactNode;
   href: string;
-  accent: "rose" | "navy" | "green" | "terracotta";
+  accent: "rose" | "charcoal" | "green" | "terracotta";
 }
 
 function KpiCard({ title, value, change, trend, icon, href, accent }: KpiCardProps) {
   const accents = {
-    rose: "bg-rose-light text-rose-vale",
-    navy: "bg-navy-light text-navy",
-    green: "bg-[#E6F0EA] text-success",
-    terracotta: "bg-[#F4E6E2] text-terracotta",
+    rose: "bg-brand-light text-brand-dark",
+    charcoal: "bg-charcoal-light text-charcoal",
+    green: "bg-green-50 text-success",
+    terracotta: "bg-red-50 text-danger",
   };
   return (
     <Link href={href}>
@@ -437,9 +439,9 @@ function QuickAction({
   return (
     <Link
       href={href}
-      className="flex flex-col items-center gap-2 p-4 bg-white rounded-xl border border-border-soft hover:border-rose-vale hover:shadow-md transition"
+      className="flex flex-col items-center gap-2 p-4 bg-white rounded-xl border border-border-soft hover:border-brand hover:shadow-md transition"
     >
-      <div className="bg-rose-light p-3 rounded-lg text-rose-vale">{icon}</div>
+      <div className="bg-brand-light p-3 rounded-lg text-brand-dark">{icon}</div>
       <span className="text-sm font-medium text-ink text-center">{label}</span>
     </Link>
   );
@@ -461,7 +463,7 @@ function AttentionItem({
   return (
     <Link
       href={href}
-      className="flex items-start justify-between gap-3 rounded-lg border border-border-soft p-4 hover:border-rose-vale hover:bg-ivory transition"
+      className="flex items-start justify-between gap-3 rounded-lg border border-border-soft p-4 hover:border-brand hover:bg-ivory transition"
     >
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-ink truncate">{label}</p>
@@ -534,7 +536,7 @@ function RecentInvoices({
                     <td className="py-2 font-medium">
                       <Link
                         href={`/dashboard/invoices/${inv.id}`}
-                        className="text-rose-vale hover:underline"
+                        className="text-brand-dark hover:underline"
                       >
                         {inv.invoiceNumber}
                       </Link>

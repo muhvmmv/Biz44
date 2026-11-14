@@ -37,7 +37,7 @@ export default function LoginPage() {
       footer={
         <p>
           Don&apos;t have an account?{" "}
-          <Link href="/auth/register" className="text-rose-vale font-medium hover:underline">
+          <Link href="/auth/register" className="text-brand-dark font-medium hover:underline">
             Sign up for free
           </Link>
         </p>
@@ -48,19 +48,19 @@ export default function LoginPage() {
           <div className="bg-[#F4E2E1] border border-danger text-danger px-4 py-3 rounded-lg text-sm">{error}</div>
         )}
         <div>
-          <label htmlFor="email" className="block text-sm font-medium text-navy mb-1">Email address</label>
+          <label htmlFor="email" className="block text-sm font-medium text-charcoal mb-1">Email address</label>
           <input id="email" type="email" required value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-lg border border-border-soft bg-white px-4 py-2.5 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-rose-vale focus:border-rose-vale"
+            className="w-full rounded-lg border border-border-soft bg-white px-4 py-2.5 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand"
             placeholder="you@example.com" />
         </div>
 
         <div>
-          <label htmlFor="password" className="block text-sm font-medium text-navy mb-1">Password</label>
+          <label htmlFor="password" className="block text-sm font-medium text-charcoal mb-1">Password</label>
           <div className="relative">
             <input id="password" type={showPassword ? "text" : "password"} required
               value={password} onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-border-soft bg-white pl-4 pr-10 py-2.5 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-rose-vale focus:border-rose-vale"
+              className="w-full rounded-lg border border-border-soft bg-white pl-4 pr-10 py-2.5 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand"
               placeholder="••••••••" />
             <button type="button" onClick={() => setShowPassword(!showPassword)}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-soft hover:text-ink">
@@ -71,16 +71,16 @@ export default function LoginPage() {
 
         <div className="flex items-center justify-between text-sm">
           <label className="flex items-center gap-2 text-ink-soft">
-            <input type="checkbox" className="rounded border-border-soft text-rose-vale focus:ring-rose-vale" />
+            <input type="checkbox" className="rounded border-border-soft text-brand-dark focus:ring-brand" />
             Remember me
           </label>
-          <Link href="/auth/forgot-password" className="text-rose-vale font-medium hover:underline">
+          <Link href="/auth/forgot-password" className="text-brand-dark font-medium hover:underline">
             Forgot password?
           </Link>
         </div>
 
         <button type="submit" disabled={submitting}
-          className="w-full rounded-lg bg-rose-vale px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-rose-dark transition-all disabled:opacity-50">
+          className="w-full rounded-lg bg-charcoal px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-charcoal-dark transition-all disabled:opacity-50">
           {submitting ? "Signing in..." : "Sign in"}
         </button>
       </form>

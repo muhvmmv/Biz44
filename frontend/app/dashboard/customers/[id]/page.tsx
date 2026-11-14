@@ -105,7 +105,7 @@ export default function CustomerDetailPage() {
         {(["overview", "invoices", "payments"] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${
-              tab === t ? "border-rose-vale text-rose-vale" : "border-transparent text-ink-soft hover:text-navy"
+              tab === t ? "border-brand text-brand-dark" : "border-transparent text-ink-soft hover:text-charcoal"
             }`}>
             {t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
@@ -168,7 +168,7 @@ export default function CustomerDetailPage() {
               {invoices.map((inv) => (
                 <tr key={inv.id} className="hover:bg-ivory">
                   <td className="px-6 py-3">
-                    <Link href={`/dashboard/invoices/${inv.id}`} className="font-medium text-rose-vale hover:underline">
+                    <Link href={`/dashboard/invoices/${inv.id}`} className="font-medium text-brand-dark hover:underline">
                       {inv.invoiceNumber}
                     </Link>
                   </td>

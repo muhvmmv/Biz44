@@ -17,6 +17,7 @@ interface StockMovement {
 
 const typeConfig: Record<string, { label: string; variant: "success" | "danger" | "warning" | "info" | "default" }> = {
   receipt: { label: "Receipt", variant: "success" },
+  opening: { label: "Opening stock", variant: "success" },
   sale: { label: "Sale", variant: "info" },
   return: { label: "Return", variant: "success" },
   supplier_return: { label: "Supplier Return", variant: "warning" },

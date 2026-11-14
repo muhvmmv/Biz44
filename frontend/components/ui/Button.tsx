@@ -18,10 +18,10 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       "inline-flex items-center justify-center font-semibold rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed";
 
     const variants: Record<Variant, string> = {
-      primary: "bg-rose-vale text-white hover:bg-rose-dark focus:ring-rose-vale",
-      secondary: "bg-navy text-white hover:bg-navy-dark focus:ring-navy",
-      outline: "border border-border-soft bg-white text-navy hover:bg-ivory focus:ring-rose-vale",
-      ghost: "text-ink-soft hover:bg-ivory focus:ring-rose-vale",
+      primary: "bg-charcoal text-white hover:bg-charcoal-dark focus:ring-brand",
+      secondary: "bg-brand-light text-brand-dark hover:bg-orange-100 focus:ring-brand",
+      outline: "border border-border-soft bg-white text-charcoal hover:bg-ivory focus:ring-brand",
+      ghost: "text-ink-soft hover:bg-ivory focus:ring-brand",
       danger: "bg-danger text-white hover:opacity-90 focus:ring-danger",
     };
 

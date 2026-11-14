@@ -52,10 +52,10 @@ export default function TaxPage() {
         <>
           <Card>
             <CardContent className="p-5">
-              <label className="block text-sm font-medium text-navy mb-2">Tax Rate (%)</label>
+              <label className="block text-sm font-medium text-charcoal mb-2">Tax Rate (%)</label>
               <input type="number" step="0.01" min="0" value={taxRate}
                 onChange={(e) => setTaxRate(Number(e.target.value))}
-                className="w-full sm:w-40 rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" />
+                className="w-full sm:w-40 rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" />
               <p className="text-xs text-ink-soft mt-2">
                 Applied to finalized invoices. Configure per-country tax rules in Settings.
               </p>
@@ -69,7 +69,7 @@ export default function TaxPage() {
             </CardContent></Card>
             <Card><CardContent className="p-5">
               <p className="text-sm text-ink-soft">Tax Collected</p>
-              <p className="text-2xl font-bold mt-1 text-rose-vale">{format(taxCollected)}</p>
+              <p className="text-2xl font-bold mt-1 text-brand-dark">{format(taxCollected)}</p>
             </CardContent></Card>
             <Card><CardContent className="p-5">
               <p className="text-sm text-ink-soft">This Month</p>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import PaymentAccountSelect from "@/components/ui/PaymentAccountSelect";
 import { apiFetch } from "@/lib/api";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -41,6 +42,7 @@ export default function ExpensesPage() {
     description: "",
     date: new Date().toISOString().split("T")[0],
   });
+  const [accountId, setAccountId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -76,7 +78,7 @@ export default function ExpensesPage() {
     try {
       await apiFetch("/accounting/expenses", {
         method: "POST",
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, accountId }),
       });
       setShowForm(false);
       setForm({
@@ -174,17 +176,17 @@ export default function ExpensesPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-border-soft">
             <div className="p-6 border-b border-border-soft">
-              <h2 className="text-lg font-bold text-navy">Record Expense</h2>
+              <h2 className="text-lg font-bold text-charcoal">Record Expense</h2>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">
+                <label className="block text-sm font-medium mb-1 text-charcoal">
                   Category
                 </label>
                 <select
                   value={form.category}
                   onChange={(e) => setForm({ ...form, category: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
                 >
                   {categories.map((c) => (
                     <option key={c} value={c}>
@@ -194,7 +196,7 @@ export default function ExpensesPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">
+                <label className="block text-sm font-medium mb-1 text-charcoal">
                   Amount
                 </label>
                 <NumericInput
@@ -205,22 +207,28 @@ export default function ExpensesPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Date</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">
+                  Paid from
+                </label>
+                <PaymentAccountSelect value={accountId} onChange={setAccountId} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Date</label>
                 <input
                   type="date"
                   value={form.date}
                   onChange={(e) => setForm({ ...form, date: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">
+                <label className="block text-sm font-medium mb-1 text-charcoal">
                   Description
                 </label>
                 <input
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
                 />
               </div>
               {error && <p className="text-danger text-sm">{error}</p>}

@@ -64,7 +64,7 @@ export default function InvoicesPage() {
 
       <input type="text" placeholder="Search by invoice number or customer..."
         value={search} onChange={(e) => setSearch(e.target.value)}
-        className="w-full sm:w-80 rounded-lg border border-border-soft bg-white px-4 py-2.5 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-rose-vale" />
+        className="w-full sm:w-80 rounded-lg border border-border-soft bg-white px-4 py-2.5 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-brand" />
 
       <Card>
         <CardContent className="p-0">
@@ -98,7 +98,7 @@ export default function InvoicesPage() {
                   {filtered.map((inv) => (
                     <tr key={inv.id} className="hover:bg-ivory">
                       <td className="px-6 py-4">
-                        <Link href={`/dashboard/invoices/${inv.id}`} className="font-medium text-rose-vale hover:underline">
+                        <Link href={`/dashboard/invoices/${inv.id}`} className="font-medium text-brand-dark hover:underline">
                           {inv.invoiceNumber}
                         </Link>
                       </td>

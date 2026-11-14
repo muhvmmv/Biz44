@@ -97,7 +97,7 @@ const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(
         onBlur={handleBlur}
         placeholder={placeholder ?? "0"}
         className={cn(
-          "w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-rose-vale",
+          "w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-brand",
           className
         )}
         {...props}
