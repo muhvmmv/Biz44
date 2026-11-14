@@ -43,7 +43,7 @@ export default function TransactionsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Transactions" description="Every financial event in your business." />
+      <PageHeader title="Older records" description="Financial records kept before the double-entry ledger started. They are read-only; everything since is in the Journal." />
 
       <div className="flex gap-2 flex-wrap">
         {["", "sale", "payment", "expense", "payroll", "refund"].map((t) => (
@@ -52,8 +52,8 @@ export default function TransactionsPage() {
             onClick={() => setFilter(t)}
             className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${
               filter === t
-                ? "bg-rose-vale text-white"
-                : "bg-white border border-border-soft text-ink-soft hover:border-rose-vale"
+                ? "bg-charcoal text-white"
+                : "bg-white border border-border-soft text-ink-soft hover:border-brand"
             }`}
           >
             {t === "" ? "All" : t.charAt(0).toUpperCase() + t.slice(1)}

@@ -105,7 +105,7 @@ export default function EmployeeDetailPage() {
         {(["overview", "attendance", "payroll", "leave"] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${
-              tab === t ? "border-rose-vale text-rose-vale" : "border-transparent text-ink-soft hover:text-navy"
+              tab === t ? "border-brand text-brand-dark" : "border-transparent text-ink-soft hover:text-charcoal"
             }`}>
             {t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
@@ -211,22 +211,22 @@ export default function EmployeeDetailPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-border-soft">
             <div className="p-6 border-b border-border-soft">
-              <h2 className="text-lg font-bold text-navy">Mark Attendance</h2>
+              <h2 className="text-lg font-bold text-charcoal">Mark Attendance</h2>
               <p className="text-sm text-ink-soft mt-1">{employee.firstName} {employee.lastName}</p>
             </div>
             <form onSubmit={markAttendance} className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Date</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Date</label>
                 <input type="date" value={attForm.date} onChange={(e) => setAttForm({ ...attForm, date: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" />
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Status</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Status</label>
                 <div className="grid grid-cols-4 gap-2">
                   {["present", "absent", "late", "leave"].map((s) => (
                     <button key={s} type="button" onClick={() => setAttForm({ ...attForm, status: s })}
                       className={`py-2 rounded-lg text-sm font-medium border transition ${
-                        attForm.status === s ? "border-rose-vale bg-rose-light text-rose-dark" : "border-border-soft text-ink-soft"
+                        attForm.status === s ? "border-brand bg-brand-light text-brand-dark" : "border-border-soft text-ink-soft"
                       }`}>
                       {s}
                     </button>
@@ -234,9 +234,9 @@ export default function EmployeeDetailPage() {
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Notes</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Notes</label>
                 <input value={attForm.notes} onChange={(e) => setAttForm({ ...attForm, notes: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" />
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="outline" onClick={() => setShowAttendance(false)}>Cancel</Button>

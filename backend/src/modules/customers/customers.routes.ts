@@ -1,9 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
-import { CrudService } from '../../services/crud.service';
-import { PrismaClient } from '@prisma/client';
+import { CrudService, pick } from '../../services/crud.service';
+import { badRequest } from '../../lib/errors';
 
-const prisma = new PrismaClient();
+import { prisma } from '../../lib/prisma';
 const router = Router();
 const customerService = new CrudService('customer');
 
@@ -27,7 +27,9 @@ router.get('/:id/summary', async (req: Request, res: Response, next: NextFunctio
     const totalSales = invoices
       .filter((i) => i.status !== 'draft' && i.status !== 'cancelled')
       .reduce((s: number, i) => s + i.total, 0);
-    const totalPaid = invoices.reduce((s: number, i) => s + i.amountPaid, 0);
+    const totalPaid = invoices
+      .filter((i) => i.status !== 'draft' && i.status !== 'cancelled')
+      .reduce((s: number, i) => s + i.amountPaid, 0);
     const outstanding = totalSales - totalPaid;
 
     const payments = invoices
@@ -55,38 +57,41 @@ router.get('/:id/summary', async (req: Request, res: Response, next: NextFunctio
   } catch (err) { next(err); }
 });
 
+const WRITABLE = ['firstName', 'lastName', 'email', 'phone', 'address'] as const;
+
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const customers = await customerService.findMany({ companyId: req.user?.companyId });
-    res.json({ success: true, data: customers });
+    const rows = await customerService.findMany(req.user!.companyId, { orderBy: { createdAt: 'desc' } });
+    res.json({ success: true, data: rows });
   } catch (err) { next(err); }
 });
 
 router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const companyId = req.user?.companyId;
-    const customer = await customerService.create({ ...req.body, companyId });
-    res.status(201).json({ success: true, data: customer });
+    const data = pick(req.body, WRITABLE);
+    if (!data.firstName || !data.lastName) throw badRequest('firstName and lastName required');
+    const row = await customerService.create(req.user!.companyId, data);
+    res.status(201).json({ success: true, data: row });
   } catch (err) { next(err); }
 });
 
 router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const customer = await customerService.findById(req.params.id);
-    res.json({ success: true, data: customer });
+    const row = await customerService.findOne(req.params.id, req.user!.companyId);
+    res.json({ success: true, data: row });
   } catch (err) { next(err); }
 });
 
 router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const customer = await customerService.update(req.params.id, req.body);
-    res.json({ success: true, data: customer });
+    const row = await customerService.update(req.params.id, req.user!.companyId, pick(req.body, WRITABLE));
+    res.json({ success: true, data: row });
   } catch (err) { next(err); }
 });
 
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    await customerService.delete(req.params.id);
+    await customerService.delete(req.params.id, req.user!.companyId);
     res.json({ success: true });
   } catch (err) { next(err); }
 });

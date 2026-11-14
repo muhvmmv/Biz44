@@ -18,6 +18,7 @@ interface Purchase {
   dueDate: string | null;
   total: number;
   amountPaid: number;
+  returnedAmount?: number;
   status: string;
   supplier: { id: string; name: string } | null;
   items: { id: string; quantity: number; unitCost: number }[];
@@ -84,7 +85,7 @@ export default function PurchasesPage() {
   // Summary cards
   const totalPurchases = purchases.reduce((s, p) => s + p.total, 0);
   const totalOutstanding = purchases.reduce(
-    (s, p) => s + (p.total - p.amountPaid),
+    (s, p) => s + Math.max(0, p.total - p.amountPaid - (p.returnedAmount || 0)),
     0
   );
   const overdueCount = purchases.filter((p) => p.status === "overdue").length;
@@ -140,8 +141,8 @@ export default function PurchasesPage() {
               onClick={() => setFilter(f.value)}
               className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${
                 filter === f.value
-                  ? "bg-rose-vale text-white"
-                  : "bg-white border border-border-soft text-ink-soft hover:border-rose-vale"
+                  ? "bg-charcoal text-white"
+                  : "bg-white border border-border-soft text-ink-soft hover:border-brand"
               }`}
             >
               {f.label}
@@ -153,7 +154,7 @@ export default function PurchasesPage() {
           placeholder="Search by reference or supplier..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full sm:w-64 sm:ml-auto rounded-lg border border-border-soft bg-white px-4 py-2 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-rose-vale"
+          className="w-full sm:w-64 sm:ml-auto rounded-lg border border-border-soft bg-white px-4 py-2 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-brand"
         />
       </div>
 
@@ -188,13 +189,13 @@ export default function PurchasesPage() {
                 </thead>
                 <tbody className="divide-y divide-border-soft">
                   {filtered.map((p) => {
-                    const balance = p.total - p.amountPaid;
+                    const balance = p.total - p.amountPaid - (p.returnedAmount || 0);
                     return (
                       <tr key={p.id} className="hover:bg-ivory">
                         <td className="px-6 py-4">
                           <Link
                             href={`/dashboard/purchases/${p.id}`}
-                            className="font-medium text-rose-vale hover:underline"
+                            className="font-medium text-brand-dark hover:underline"
                           >
                             {p.reference || "—"}
                           </Link>

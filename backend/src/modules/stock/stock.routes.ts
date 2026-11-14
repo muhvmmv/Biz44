@@ -1,21 +1,28 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
-import { resolveLocation, locationWhere } from '../../middleware/locationAuth';
-import { PrismaClient } from '@prisma/client';
+import { resolveLocation, locationWhere, requireTargetLocation } from '../../middleware/locationAuth';
+import { prisma } from '../../lib/prisma';
+import { badRequest, notFound } from '../../lib/errors';
+import { resolvePaymentAccount, parsePositiveAmount, parsePositiveQuantity } from '../../lib/accounts';
+import { postJournal, systemAccount } from '../../lib/ledger';
+import {
+  addStock, consumeFifo, stockAt, averageCost, syncProductTotals, postInventoryLoss,
+} from '../../lib/inventory';
+import { runStockCheck, fixSafeStockIssues } from '../../lib/stockCheck';
+import { returnToSupplier } from '../purchases/purchase.service';
 
-const prisma = new PrismaClient();
 const router = Router();
 
 router.use(authenticate);
 
-async function findOrCreateAccount(tx: any, companyId: string, name: string, type: string) {
-  const existing = await tx.account.findFirst({ where: { companyId, name } });
-  if (existing) return existing;
-  return tx.account.create({ data: { companyId, name, type, balance: 0 } });
-}
+const RECEIVE_PAYMENT_STATUSES = ['paid', 'unpaid', 'partially_paid'];
 
-function targetLocationId(req: Request): string {
-  return req.locationId || req.allowedLocationIds[0];
+/** Load a product only if it belongs to this company. */
+async function findCompanyProduct(tx: any, companyId: string, productId: unknown) {
+  if (typeof productId !== 'string' || !productId) throw badRequest('Product is required');
+  const product = await tx.product.findFirst({ where: { id: productId, companyId } });
+  if (!product) throw notFound('Product not found');
+  return product;
 }
 
 // ---------- LIST movements (location-scoped) ----------
@@ -38,13 +45,40 @@ router.get('/', resolveLocation, async (req: Request, res: Response, next: NextF
 // ---------- LIST batches for a product (location-scoped) ----------
 router.get('/batches/:productId', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const companyId = req.user?.companyId!;
+    const companyId = req.user!.companyId;
+    await findCompanyProduct(prisma, companyId, req.params.productId);
     const batches = await prisma.inventoryBatch.findMany({
       where: { companyId, productId: req.params.productId, ...locationWhere(req) },
       orderBy: { receivedAt: 'asc' },
-      include: { supplier: { select: { name: true } } },
+      include: { supplier: { select: { name: true } }, location: { select: { name: true } } },
     });
     res.json({ success: true, data: batches });
+  } catch (err) { next(err); }
+});
+
+// ---------- STOCK LEVELS of one product per location ----------
+router.get('/levels/:productId', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const companyId = req.user!.companyId;
+    await findCompanyProduct(prisma, companyId, req.params.productId);
+    const batches = await prisma.inventoryBatch.findMany({
+      where: {
+        companyId,
+        productId: req.params.productId,
+        quantityRemaining: { gt: 0 },
+        locationId: { in: req.allowedLocationIds },
+      },
+      select: { locationId: true, quantityRemaining: true, unitCost: true, location: { select: { name: true } } },
+    });
+    const map = new Map<string, { locationId: string; name: string; quantity: number; value: number }>();
+    for (const b of batches) {
+      const key = b.locationId || 'none';
+      const cur = map.get(key) || { locationId: key, name: b.location?.name || 'No location', quantity: 0, value: 0 };
+      cur.quantity += b.quantityRemaining;
+      cur.value += b.quantityRemaining * b.unitCost;
+      map.set(key, cur);
+    }
+    res.json({ success: true, data: Array.from(map.values()) });
   } catch (err) { next(err); }
 });
 
@@ -52,12 +86,13 @@ router.get('/batches/:productId', resolveLocation, async (req: Request, res: Res
 router.post('/receive', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const companyId = req.user!.companyId;
-    const locationId = targetLocationId(req);
+    const locationId = requireTargetLocation(req);
     const {
-      items, supplierId, reference, notes,
-      paymentStatus = 'paid', amountPaid, paymentAccount = 'Cash',
+      items: rawItems, supplierId, reference, notes,
+      paymentStatus: requestedStatus = 'paid', amountPaid, paymentAccount, paymentAccountId,
     } = req.body as {
       items: { productId: string; quantity: number; unitCost: number; sellingPrice?: number }[];
+      paymentAccountId?: string;
       supplierId?: string;
       reference?: string;
       notes?: string;
@@ -66,16 +101,59 @@ router.post('/receive', resolveLocation, async (req: Request, res: Response, nex
       paymentAccount?: string;
     };
 
-    if (!items || items.length === 0) {
+    if (!Array.isArray(rawItems) || rawItems.length === 0) {
       return res.status(400).json({ success: false, message: 'At least one item required' });
+    }
+    if (!RECEIVE_PAYMENT_STATUSES.includes(requestedStatus)) {
+      throw badRequest('Payment status must be paid, unpaid or partially_paid');
+    }
+
+    const items = rawItems.map((it, i) => {
+      const unitCost = Number(it?.unitCost);
+      if (!Number.isFinite(unitCost) || unitCost < 0) {
+        throw badRequest(`Line ${i + 1}: unit cost must be 0 or more`);
+      }
+      let sellingPrice: number | undefined;
+      if (it?.sellingPrice !== undefined && it?.sellingPrice !== null) {
+        sellingPrice = Number(it.sellingPrice);
+        if (!Number.isFinite(sellingPrice) || sellingPrice < 0) {
+          throw badRequest(`Line ${i + 1}: selling price must be 0 or more`);
+        }
+      }
+      return {
+        productId: String(it?.productId || ''),
+        quantity: parsePositiveQuantity(it?.quantity, `Line ${i + 1} quantity`),
+        unitCost,
+        sellingPrice,
+      };
+    });
+
+    // Every product and the supplier must belong to this company.
+    const productIds = Array.from(new Set(items.map((it) => it.productId)));
+    const ownedCount = await prisma.product.count({ where: { id: { in: productIds }, companyId } });
+    if (ownedCount !== productIds.length) throw notFound('One or more products were not found');
+    if (supplierId) {
+      const supplier = await prisma.supplier.findFirst({ where: { id: supplierId, companyId }, select: { id: true } });
+      if (!supplier) throw notFound('Supplier not found');
     }
 
     const totalCost = items.reduce((s, it) => s + it.quantity * it.unitCost, 0);
-    const paidAmount =
-      paymentStatus === 'paid' ? totalCost :
-      paymentStatus === 'unpaid' ? 0 :
-      Math.min(Number(amountPaid ?? 0), totalCost);
+    let paidAmount = 0;
+    if (requestedStatus === 'paid') paidAmount = totalCost;
+    else if (requestedStatus === 'partially_paid') {
+      paidAmount = parsePositiveAmount(amountPaid, 'Amount paid');
+      if (paidAmount > totalCost + 0.01) throw badRequest('Amount paid cannot be more than the purchase total');
+      paidAmount = Math.min(paidAmount, totalCost);
+    }
     const outstanding = totalCost - paidAmount;
+    // Derive the stored status from the amounts so it is always consistent.
+    const paymentStatus =
+      outstanding <= 0.01 ? 'paid' : paidAmount > 0 ? 'partially_paid' : 'unpaid';
+
+    // Validate the payment account before writing anything.
+    const payFromAccount = paidAmount > 0
+      ? await resolvePaymentAccount(prisma, companyId, { accountId: paymentAccountId, account: paymentAccount })
+      : null;
 
     const result = await prisma.$transaction(async (tx) => {
       const purchase = await tx.purchase.create({
@@ -100,111 +178,62 @@ router.post('/receive', resolveLocation, async (req: Request, res: Response, nex
         },
       });
 
-      for (const item of items) {
-        const product = await tx.product.findUnique({ where: { id: item.productId } });
-        if (!product) throw new Error(`Product not found: ${item.productId}`);
-
-        const batch = await tx.inventoryBatch.create({
+      // Record the initial payment in the purchase's payment history.
+      if (paidAmount > 0 && payFromAccount) {
+        await tx.purchasePayment.create({
           data: {
             companyId,
             locationId,
-            productId: product.id,
-            supplierId: supplierId || null,
             purchaseId: purchase.id,
-            quantityReceived: item.quantity,
-            quantityRemaining: item.quantity,
-            unitCost: item.unitCost,
-            sellingPriceSnapshot: item.sellingPrice ?? product.price,
+            amount: paidAmount,
+            method: 'on_receipt',
+            account: payFromAccount.name,
             reference,
-            receivedAt: new Date(),
-          },
-        });
-
-        const addedCost = item.quantity * item.unitCost;
-        const newQuantity = product.quantity + item.quantity;
-        const newTotalValue = product.totalCostValue + addedCost;
-
-        await tx.product.update({
-          where: { id: product.id },
-          data: {
-            quantity: newQuantity,
-            totalCostValue: newTotalValue,
-            cost: item.unitCost,
-            price: item.sellingPrice ?? product.price,
-          },
-        });
-
-        await tx.stockMovement.create({
-          data: {
-            companyId,
-            locationId,
-            productId: product.id,
-            batchId: batch.id,
-            type: 'receipt',
-            quantity: item.quantity,
-            balance: newQuantity,
-            unitCost: item.unitCost,
-            totalCost: addedCost,
-            reference,
-            notes,
+            notes: 'Paid when goods were received',
           },
         });
       }
 
-      const inventoryAccount = await findOrCreateAccount(tx, companyId, 'Inventory', 'asset');
-      await tx.account.update({
-        where: { id: inventoryAccount.id },
-        data: { balance: { increment: totalCost } },
-      });
-      await tx.transaction.create({
-        data: {
+      for (const item of items) {
+        const product = await findCompanyProduct(tx, companyId, item.productId);
+        await addStock(tx, {
           companyId,
           locationId,
-          accountId: inventoryAccount.id,
-          type: 'inventory',
-          description: `Inventory receipt${reference ? ` ${reference}` : ''}`,
-          amount: totalCost,
-          date: new Date(),
-        },
+          productId: product.id,
+          quantity: item.quantity,
+          unitCost: item.unitCost,
+          supplierId: supplierId || null,
+          purchaseId: purchase.id,
+          sellingPriceSnapshot: item.sellingPrice ?? product.price,
+          type: 'receipt',
+          reference,
+          notes,
+        });
+        // Remember the latest purchase cost and (if given) the new default selling price.
+        await tx.product.update({
+          where: { id: product.id },
+          data: { cost: item.unitCost, price: item.sellingPrice ?? product.price },
+        });
+      }
+      await syncProductTotals(tx, companyId, productIds);
+
+      // Dr Inventory (full cost) / Cr Cash-or-Bank (paid now) / Cr Accounts Payable (owed)
+      const inventory = await systemAccount(tx, companyId, 'inventory');
+      const ap = await systemAccount(tx, companyId, 'ap');
+      await postJournal(tx, {
+        companyId,
+        locationId,
+        description: `Goods received${reference ? ` ${reference}` : ''}`,
+        sourceType: 'purchase',
+        sourceId: purchase.id,
+        reference,
+        createdById: req.user!.id,
+        lines: [
+          { accountId: inventory.id, debit: totalCost },
+          ...(paidAmount > 0 && payFromAccount ? [{ accountId: payFromAccount.id, credit: paidAmount }] : []),
+          ...(outstanding > 0 ? [{ accountId: ap.id, credit: outstanding }] : []),
+        ],
       });
-
-      if (paidAmount > 0) {
-        const cashAccount = await findOrCreateAccount(tx, companyId, paymentAccount, 'asset');
-        await tx.account.update({
-          where: { id: cashAccount.id },
-          data: { balance: { decrement: paidAmount } },
-        });
-        await tx.transaction.create({
-          data: {
-            companyId,
-            locationId,
-            accountId: cashAccount.id,
-            type: 'payment',
-            description: `Paid for inventory${reference ? ` ${reference}` : ''}`,
-            amount: paidAmount,
-            date: new Date(),
-          },
-        });
-      }
-
-      if (outstanding > 0) {
-        const apAccount = await findOrCreateAccount(tx, companyId, 'Accounts Payable', 'liability');
-        await tx.account.update({
-          where: { id: apAccount.id },
-          data: { balance: { increment: outstanding } },
-        });
-        await tx.transaction.create({
-          data: {
-            companyId,
-            locationId,
-            accountId: apAccount.id,
-            type: 'purchase',
-            description: `Inventory owed${reference ? ` ${reference}` : ''}`,
-            amount: outstanding,
-            date: new Date(),
-          },
-        });
-      }
 
       return purchase;
     });
@@ -214,283 +243,135 @@ router.post('/receive', resolveLocation, async (req: Request, res: Response, nex
 });
 
 // ---------- DAMAGE / WRITE-OFF ----------
+// Removes stock FIFO at the selected location and books its cost as Inventory Loss.
 router.post('/damage', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const companyId = req.user!.companyId;
-    const locationId = targetLocationId(req);
-    const { productId, quantity, reason, notes } = req.body as {
-      productId: string;
-      quantity: number;
-      reason?: string;
-      notes?: string;
-    };
-
-    if (!productId || quantity <= 0) {
-      return res.status(400).json({ success: false, message: 'Invalid input' });
-    }
+    const locationId = requireTargetLocation(req);
+    const { productId, reason, notes } = req.body as { productId: string; reason?: string; notes?: string };
+    const quantity = parsePositiveQuantity(req.body?.quantity);
 
     await prisma.$transaction(async (tx) => {
-      const product = await tx.product.findUnique({ where: { id: productId } });
-      if (!product) throw new Error('Product not found');
-      if (product.quantity < quantity) throw new Error('Insufficient stock');
-
-      const batches = await tx.inventoryBatch.findMany({
-        where: { productId, locationId, quantityRemaining: { gt: 0 } },
-        orderBy: { receivedAt: 'asc' },
+      const product = await findCompanyProduct(tx, companyId, productId);
+      const { totalCost } = await consumeFifo(tx, {
+        companyId, locationId, productId: product.id, productName: product.name, quantity,
+        type: 'damage', reference: reason || 'Damage/Write-off', notes,
       });
-
-      let remaining = quantity;
-      let totalWrittenOff = 0;
-      let runningBalance = product.quantity;
-
-      for (const batch of batches) {
-        if (remaining <= 0) break;
-        const consume = Math.min(batch.quantityRemaining, remaining);
-
-        await tx.inventoryBatch.update({
-          where: { id: batch.id },
-          data: { quantityRemaining: batch.quantityRemaining - consume },
-        });
-
-        const cost = consume * batch.unitCost;
-        totalWrittenOff += cost;
-        runningBalance -= consume;
-
-        await tx.stockMovement.create({
-          data: {
-            companyId,
-            locationId,
-            productId,
-            batchId: batch.id,
-            type: 'damage',
-            quantity: -consume,
-            balance: runningBalance,
-            unitCost: batch.unitCost,
-            totalCost: cost,
-            reference: reason || 'Damage/Write-off',
-            notes,
-          },
-        });
-
-        remaining -= consume;
-      }
-
-      const newQuantity = product.quantity - quantity;
-      const newTotalValue = product.totalCostValue - totalWrittenOff;
-
-      await tx.product.update({
-        where: { id: productId },
-        data: { quantity: newQuantity, totalCostValue: newTotalValue },
+      await postInventoryLoss(tx, {
+        companyId, locationId, amount: totalCost, sourceType: 'stock_writeoff', sourceId: product.id,
+        reference: reason || 'Write-off',
+        description: `Write-off: ${quantity} × ${product.name}${reason ? ` (${reason})` : ''}`,
       });
-
-      const inventoryAccount = await findOrCreateAccount(tx, companyId, 'Inventory', 'asset');
-      const lossAccount = await findOrCreateAccount(tx, companyId, 'Inventory Loss', 'expense');
-
-      await tx.account.update({
-        where: { id: inventoryAccount.id },
-        data: { balance: { decrement: totalWrittenOff } },
-      });
-      await tx.account.update({
-        where: { id: lossAccount.id },
-        data: { balance: { increment: totalWrittenOff } },
-      });
-      await tx.transaction.create({
-        data: {
-          companyId,
-          locationId,
-          accountId: lossAccount.id,
-          type: 'expense',
-          description: `Inventory write-off${reason ? `: ${reason}` : ''}`,
-          amount: totalWrittenOff,
-          date: new Date(),
-        },
-      });
+      await syncProductTotals(tx, companyId, [product.id]);
     });
 
     res.json({ success: true });
-  } catch (err: any) {
-    if (err.message?.includes('Insufficient')) {
-      return res.status(400).json({ success: false, message: err.message });
-    }
-    next(err);
-  }
+  } catch (err) { next(err); }
 });
 
 // ---------- SUPPLIER RETURN ----------
-router.post('/supplier-return', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
+// Kept for API compatibility; the purchase page uses POST /purchases/:id/return.
+router.post('/supplier-return', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const companyId = req.user!.companyId;
-    const locationId = targetLocationId(req);
-    const { productId, quantity, batchId, reference, notes } = req.body as {
-      productId: string;
-      quantity: number;
-      batchId?: string;
-      reference?: string;
-      notes?: string;
-    };
-
-    if (!productId || quantity <= 0) {
-      return res.status(400).json({ success: false, message: 'Invalid input' });
-    }
-
-    await prisma.$transaction(async (tx) => {
-      const product = await tx.product.findUnique({ where: { id: productId } });
-      if (!product) throw new Error('Product not found');
-      if (product.quantity < quantity) throw new Error('Insufficient stock');
-
-      let batch;
-      if (batchId) {
-        batch = await tx.inventoryBatch.findFirst({ where: { id: batchId, locationId } });
-      }
-      if (!batch) {
-        const candidates = await tx.inventoryBatch.findMany({
-          where: { productId, locationId, quantityRemaining: { gt: 0 } },
-          orderBy: { receivedAt: 'desc' },
-        });
-        batch = candidates[0];
-      }
-      if (!batch || batch.quantityRemaining < quantity) {
-        throw new Error('Not enough stock in a single batch to return');
-      }
-
-      await tx.inventoryBatch.update({
-        where: { id: batch.id },
-        data: { quantityRemaining: batch.quantityRemaining - quantity },
-      });
-
-      const cost = quantity * batch.unitCost;
-      const newQuantity = product.quantity - quantity;
-      const newTotalValue = product.totalCostValue - cost;
-
-      await tx.product.update({
-        where: { id: productId },
-        data: { quantity: newQuantity, totalCostValue: newTotalValue },
-      });
-
-      await tx.stockMovement.create({
-        data: {
-          companyId,
-          locationId,
-          productId,
-          batchId: batch.id,
-          type: 'supplier_return',
-          quantity: -quantity,
-          balance: newQuantity,
-          unitCost: batch.unitCost,
-          totalCost: cost,
-          reference,
-          notes,
-        },
-      });
-
-      const inventoryAccount = await findOrCreateAccount(tx, companyId, 'Inventory', 'asset');
-      const apAccount = await findOrCreateAccount(tx, companyId, 'Accounts Payable', 'liability');
-
-      await tx.account.update({
-        where: { id: inventoryAccount.id },
-        data: { balance: { decrement: cost } },
-      });
-      await tx.account.update({
-        where: { id: apAccount.id },
-        data: { balance: { decrement: cost } },
-      });
-
-      await tx.transaction.create({
-        data: {
-          companyId,
-          locationId,
-          accountId: apAccount.id,
-          type: 'refund',
-          description: `Supplier return${reference ? ` ${reference}` : ''}`,
-          amount: -cost,
-          date: new Date(),
-        },
-      });
+    const { purchaseId, batchId, quantity, refundAccountId, reference, notes } = req.body || {};
+    if (!purchaseId || !batchId) throw badRequest('purchaseId and batchId are required');
+    const result = await returnToSupplier({
+      companyId: req.user!.companyId, purchaseId, batchId, quantity, refundAccountId, reference, notes,
     });
-
-    res.json({ success: true });
-  } catch (err: any) {
-    if (err.message?.includes('Insufficient') || err.message?.includes('Not enough')) {
-      return res.status(400).json({ success: false, message: err.message });
-    }
-    next(err);
-  }
+    res.json({ success: true, data: result });
+  } catch (err) { next(err); }
 });
 
-// ---------- ADJUST ----------
+/** Shared by /adjust and /count: change stock at a location by `delta` units. */
+async function applyStockChange(
+  companyId: string,
+  locationId: string,
+  productId: string,
+  delta: number,
+  type: 'adjustment' | 'count',
+  notes?: string
+) {
+  return prisma.$transaction(async (tx) => {
+    const product = await findCompanyProduct(tx, companyId, productId);
+    let valueChange = 0; // + = stock value added, - = removed
+    if (delta > 0) {
+      // Found stock is valued at the current average cost at this location.
+      const unitCost = await averageCost(tx, companyId, product.id, locationId, product.cost);
+      const { totalCost } = await addStock(tx, {
+        companyId, locationId, productId: product.id, quantity: delta, unitCost,
+        sellingPriceSnapshot: product.price, type,
+        reference: type === 'count' ? 'Stock count' : 'Adjustment', notes,
+      });
+      valueChange = totalCost;
+    } else if (delta < 0) {
+      const { totalCost } = await consumeFifo(tx, {
+        companyId, locationId, productId: product.id, productName: product.name, quantity: -delta,
+        type, reference: type === 'count' ? 'Stock count' : 'Adjustment', notes,
+      });
+      valueChange = -totalCost;
+    }
+    if (valueChange !== 0) {
+      await postInventoryLoss(tx, {
+        companyId, locationId, amount: -valueChange,
+        sourceType: type === 'count' ? 'stock_count' : 'stock_adjustment', sourceId: product.id,
+        description: `${type === 'count' ? 'Stock count' : 'Stock adjustment'}: ${delta > 0 ? '+' : ''}${delta} × ${product.name}`,
+      });
+    }
+    await syncProductTotals(tx, companyId, [product.id]);
+    return { productId: product.id, delta, valueChange, onHand: await stockAt(tx, companyId, product.id, locationId) };
+  });
+}
+
+// ---------- ADJUST (add or remove units) ----------
 router.post('/adjust', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const companyId = req.user!.companyId;
-    const locationId = targetLocationId(req);
-    const { productId, quantity, notes } = req.body;
+    const locationId = requireTargetLocation(req);
+    const quantity = Number(req.body?.quantity);
+    if (!Number.isInteger(quantity) || quantity === 0) {
+      throw badRequest('Adjustment quantity must be a whole number other than 0');
+    }
+    const result = await applyStockChange(companyId, locationId, req.body?.productId, quantity, 'adjustment', req.body?.notes);
+    res.status(201).json({ success: true, data: result });
+  } catch (err) { next(err); }
+});
 
-    const product = await prisma.product.findUnique({ where: { id: productId } });
-    if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+// ---------- COUNT (set the quantity physically counted) ----------
+router.post('/count', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const companyId = req.user!.companyId;
+    const locationId = requireTargetLocation(req);
+    const counted = Number(req.body?.countedQuantity);
+    if (!Number.isInteger(counted) || counted < 0) {
+      throw badRequest('Counted quantity must be a whole number of 0 or more');
+    }
+    const product = await findCompanyProduct(prisma, companyId, req.body?.productId);
+    const onHand = await stockAt(prisma, companyId, product.id, locationId);
+    const delta = counted - onHand;
+    if (delta === 0) {
+      return res.json({ success: true, data: { productId: product.id, delta: 0, valueChange: 0, onHand } });
+    }
+    const result = await applyStockChange(companyId, locationId, product.id, delta, 'count', req.body?.notes);
+    res.status(201).json({ success: true, data: result });
+  } catch (err) { next(err); }
+});
 
-    const newBalance = product.quantity + quantity;
-    if (newBalance < 0) return res.status(400).json({ success: false, message: 'Insufficient stock' });
+// ---------- STOCK CHECK (read-only reconciliation) ----------
+router.get('/check', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const report = await runStockCheck(req.user!.companyId);
+    res.json({ success: true, data: report });
+  } catch (err) { next(err); }
+});
 
-    const avgCost = product.quantity > 0 ? product.totalCostValue / product.quantity : product.cost;
-    const totalDelta = quantity * avgCost;
-
-    await prisma.$transaction(async (tx) => {
-      let batchId: string | undefined;
-      if (quantity > 0) {
-        const batch = await tx.inventoryBatch.create({
-          data: {
-            companyId,
-            locationId,
-            productId,
-            quantityReceived: quantity,
-            quantityRemaining: quantity,
-            unitCost: avgCost,
-            reference: 'Adjustment',
-            notes,
-          },
-        });
-        batchId = batch.id;
-      } else {
-        const batches = await tx.inventoryBatch.findMany({
-          where: { productId, locationId, quantityRemaining: { gt: 0 } },
-          orderBy: { receivedAt: 'asc' },
-        });
-        let remaining = Math.abs(quantity);
-        for (const b of batches) {
-          if (remaining <= 0) break;
-          const consume = Math.min(b.quantityRemaining, remaining);
-          await tx.inventoryBatch.update({
-            where: { id: b.id },
-            data: { quantityRemaining: b.quantityRemaining - consume },
-          });
-          remaining -= consume;
-        }
-      }
-
-      await tx.product.update({
-        where: { id: productId },
-        data: {
-          quantity: newBalance,
-          totalCostValue: product.totalCostValue + totalDelta,
-        },
-      });
-
-      await tx.stockMovement.create({
-        data: {
-          companyId,
-          locationId,
-          productId,
-          batchId,
-          type: 'adjustment',
-          quantity,
-          balance: newBalance,
-          unitCost: avgCost,
-          totalCost: Math.abs(totalDelta),
-          notes,
-        },
-      });
-    });
-
-    res.status(201).json({ success: true });
+// ---------- STOCK CHECK: apply only the safe, automatic fixes ----------
+router.post('/check/fix', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (req.user!.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Admin only' });
+    }
+    const result = await fixSafeStockIssues(req.user!.companyId);
+    res.json({ success: true, data: result });
   } catch (err) { next(err); }
 });
 

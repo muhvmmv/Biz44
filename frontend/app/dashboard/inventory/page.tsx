@@ -34,6 +34,7 @@ interface Purchase {
   dueDate: string | null;
   total: number;
   amountPaid: number;
+  returnedAmount?: number;
   status: string;
   supplier: { name: string } | null;
 }
@@ -95,7 +96,7 @@ export default function InventoryPage() {
 
   // Purchase payment summary
   const outstandingTotal = purchases.reduce(
-    (s, p) => s + (p.total - p.amountPaid),
+    (s, p) => s + Math.max(0, p.total - p.amountPaid - (p.returnedAmount || 0)),
     0
   );
   const overdueCount = purchases.filter((p) => p.status === "overdue").length;
@@ -105,7 +106,7 @@ export default function InventoryPage() {
       label: "Total Products",
       value: totalProducts.toString(),
       icon: Package,
-      color: "text-rose-vale bg-rose-light",
+      color: "text-brand-dark bg-brand-light",
     },
     {
       label: "Total Units",
@@ -117,7 +118,7 @@ export default function InventoryPage() {
       label: "Inventory Value",
       value: format(totalValue),
       icon: DollarSign,
-      color: "text-navy bg-navy-light",
+      color: "text-charcoal bg-charcoal-light",
     },
     {
       label: "Low Stock",
@@ -169,7 +170,7 @@ export default function InventoryPage() {
         <CardHeader>
           <div>
             <CardTitle className="flex items-center gap-2">
-              <ShoppingCart className="w-5 h-5 text-rose-vale" />
+              <ShoppingCart className="w-5 h-5 text-brand-dark" />
               Supplier Payments
             </CardTitle>
             <p className="text-sm text-ink-soft mt-1">
@@ -177,7 +178,7 @@ export default function InventoryPage() {
             </p>
           </div>
           <Link href="/dashboard/purchases">
-            <button className="flex items-center gap-1 text-sm font-medium text-rose-vale hover:text-rose-dark">
+            <button className="flex items-center gap-1 text-sm font-medium text-brand-dark hover:text-brand-dark">
               View all <ArrowRight size={14} />
             </button>
           </Link>
@@ -225,13 +226,13 @@ export default function InventoryPage() {
                 </thead>
                 <tbody className="divide-y divide-border-soft">
                   {purchases.slice(0, 8).map((p) => {
-                    const balance = p.total - p.amountPaid;
+                    const balance = p.total - p.amountPaid - (p.returnedAmount || 0);
                     return (
                       <tr key={p.id} className="hover:bg-ivory">
                         <td className="px-6 py-3">
                           <Link
                             href={`/dashboard/purchases/${p.id}`}
-                            className="font-medium text-rose-vale hover:underline"
+                            className="font-medium text-brand-dark hover:underline"
                           >
                             {p.reference || "—"}
                           </Link>
@@ -267,7 +268,7 @@ export default function InventoryPage() {
                 <div className="px-6 py-3 border-t border-border-soft text-center">
                   <Link
                     href="/dashboard/purchases"
-                    className="text-sm font-medium text-rose-vale hover:underline"
+                    className="text-sm font-medium text-brand-dark hover:underline"
                   >
                     View all {purchases.length} unpaid purchases
                   </Link>

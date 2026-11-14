@@ -1,49 +1,89 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
-import { resolveLocation, locationWhere } from '../../middleware/locationAuth';
-import { PrismaClient } from '@prisma/client';
+import { resolveLocation, locationWhere, guardRecordLocation, requireTargetLocation } from '../../middleware/locationAuth';
 
-const prisma = new PrismaClient();
+import { prisma } from '../../lib/prisma';
+import { badRequest, notFound } from '../../lib/errors';
+import {
+  resolvePaymentAccount, parsePositiveAmount, parsePositiveQuantity,
+} from '../../lib/accounts';
+import { postJournal, systemAccount } from '../../lib/ledger';
+import { addStock, consumeFifo, restoreToBatch, syncProductTotals } from '../../lib/inventory';
 const router = Router();
 
 router.use(authenticate);
 
+// Every /:id route: the invoice must belong to this company and to a
+// location the user can access.
+router.param(
+  'id',
+  guardRecordLocation((id, companyId) =>
+    prisma.invoice.findFirst({ where: { id, companyId }, select: { locationId: true } })
+  )
+);
+
+/**
+ * Next invoice number for a company: INV-0001, INV-0002, ... Numbers are
+ * unique per company (not across companies). Numbers that are not of the
+ * short INV-n form (e.g. old timestamp fallbacks) are ignored.
+ */
 async function nextInvoiceNumber(companyId: string) {
-  // Find the highest existing invoice number (safe against deletes)
-  const lastInvoice = await prisma.invoice.findFirst({
-    where: { companyId, invoiceNumber: { startsWith: 'INV-' } },
-    orderBy: { invoiceNumber: 'desc' },
-    select: { invoiceNumber: true },
+  const rows = await prisma.$queryRaw<{ max: number | null }[]>`
+    SELECT MAX(CAST(SUBSTRING("invoiceNumber" FROM 5) AS INTEGER)) AS max
+    FROM "invoices"
+    WHERE "companyId" = ${companyId} AND "invoiceNumber" ~ '^INV-[0-9]{1,7}$'`;
+  const next = Number(rows[0]?.max ?? 0) + 1;
+  return `INV-${String(next).padStart(4, '0')}`;
+}
+
+/** True if a Prisma error is a unique-constraint clash on the invoice number. */
+function isInvoiceNumberClash(err: any) {
+  return err?.code === 'P2002';
+}
+
+const PAYABLE_STATUSES = ['unpaid', 'partially_paid', 'overdue'];
+
+interface CleanItem {
+  productId: string | null;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+/**
+ * Validate invoice lines and make sure every product and the customer
+ * belong to this company. Returns cleaned lines.
+ */
+async function validateInvoiceInput(companyId: string, body: any): Promise<CleanItem[]> {
+  const { items, customerId, customerName } = body || {};
+  if (!Array.isArray(items) || items.length === 0) throw badRequest('At least one item required');
+  if (!customerId && !(typeof customerName === 'string' && customerName.trim())) {
+    throw badRequest('Customer is required');
+  }
+  if (customerId) {
+    const customer = await prisma.customer.findFirst({ where: { id: customerId, companyId }, select: { id: true } });
+    if (!customer) throw notFound('Customer not found');
+  }
+
+  const clean: CleanItem[] = items.map((it: any, i: number) => {
+    const unitPrice = Number(it?.unitPrice);
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) throw badRequest(`Line ${i + 1}: price must be 0 or more`);
+    const description = typeof it?.description === 'string' ? it.description.trim() : '';
+    if (!description) throw badRequest(`Line ${i + 1}: description is required`);
+    return {
+      productId: it?.productId ? String(it.productId) : null,
+      description,
+      quantity: parsePositiveQuantity(it?.quantity, `Line ${i + 1} quantity`),
+      unitPrice,
+    };
   });
 
-  let nextNumber = 1;
-  if (lastInvoice) {
-    const numPart = lastInvoice.invoiceNumber.replace('INV-', '');
-    const parsed = parseInt(numPart, 10);
-    if (!isNaN(parsed)) nextNumber = parsed + 1;
+  const productIds = Array.from(new Set(clean.map((c) => c.productId).filter(Boolean))) as string[];
+  if (productIds.length > 0) {
+    const owned = await prisma.product.count({ where: { id: { in: productIds }, companyId } });
+    if (owned !== productIds.length) throw notFound('One or more products were not found');
   }
-
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const candidate = `INV-${String(nextNumber).padStart(4, '0')}`;
-    const exists = await prisma.invoice.findUnique({
-      where: { invoiceNumber: candidate },
-      select: { id: true },
-    });
-    if (!exists) return candidate;
-    nextNumber++;
-  }
-
-  return `INV-${Date.now()}`;
-}
-
-async function findOrCreateAccount(tx: any, companyId: string, name: string, type: string) {
-  const existing = await tx.account.findFirst({ where: { companyId, name } });
-  if (existing) return existing;
-  return tx.account.create({ data: { companyId, name, type, balance: 0 } });
-}
-
-function targetLocationId(req: Request): string {
-  return req.locationId || req.allowedLocationIds[0];
+  return clean;
 }
 
 // ---------- LIST (location-scoped) ----------
@@ -80,51 +120,57 @@ router.post('/', resolveLocation, async (req: Request, res: Response, next: Next
     const companyId = req.user?.companyId!;
     const {
       customerId, customerName, customerAddress, customerEmail, customerPhone,
-      dueDate, notes, items,
+      dueDate, notes,
     } = req.body;
-
-    if (!items || items.length === 0) {
-      return res.status(400).json({ success: false, message: 'At least one item required' });
-    }
-    if (!customerId && !customerName) {
-      return res.status(400).json({ success: false, message: 'Customer is required' });
-    }
+    const items = await validateInvoiceInput(companyId, req.body);
 
     let subtotal = 0;
-    for (const it of items) subtotal += Number(it.quantity) * Number(it.unitPrice);
+    for (const it of items) subtotal += it.quantity * it.unitPrice;
     const total = subtotal;
 
-    const invoiceNumber = await nextInvoiceNumber(companyId);
+    const locationId = requireTargetLocation(req);
 
-    const invoice = await prisma.invoice.create({
-      data: {
-        companyId,
-        locationId: targetLocationId(req),
-        customerId: customerId || null,
-        customerName: customerId ? null : customerName || null,
-        customerAddress: customerId ? null : customerAddress || null,
-        customerEmail: customerId ? null : customerEmail || null,
-        customerPhone: customerId ? null : customerPhone || null,
-        invoiceNumber,
-        status: 'draft',
-        subtotal,
-        discountTotal: 0,
-        taxTotal: 0,
-        total,
-        notes,
-        dueDate: dueDate ? new Date(dueDate) : null,
-        items: {
-          create: items.map((it: any) => ({
-            productId: it.productId || null,
-            description: it.description,
-            quantity: Number(it.quantity),
-            unitPrice: Number(it.unitPrice),
-            total: Number(it.quantity) * Number(it.unitPrice),
-          })),
-        },
-      },
-      include: { items: true },
-    });
+    // Two invoices created at the same moment can pick the same number;
+    // the unique constraint rejects one, so take the next number and retry.
+    let invoice: any;
+    for (let attempt = 0; ; attempt++) {
+      const invoiceNumber = await nextInvoiceNumber(companyId);
+      try {
+        invoice = await prisma.invoice.create({
+          data: {
+            companyId,
+            locationId,
+            customerId: customerId || null,
+            customerName: customerId ? null : customerName || null,
+            customerAddress: customerId ? null : customerAddress || null,
+            customerEmail: customerId ? null : customerEmail || null,
+            customerPhone: customerId ? null : customerPhone || null,
+            invoiceNumber,
+            status: 'draft',
+            subtotal,
+            discountTotal: 0,
+            taxTotal: 0,
+            total,
+            notes,
+            dueDate: dueDate ? new Date(dueDate) : null,
+            items: {
+              create: items.map((it) => ({
+                productId: it.productId,
+                description: it.description,
+                quantity: it.quantity,
+                unitPrice: it.unitPrice,
+                total: it.quantity * it.unitPrice,
+              })),
+            },
+          },
+          include: { items: true },
+        });
+        break;
+      } catch (err) {
+        if (isInvoiceNumberClash(err) && attempt < 5) continue;
+        throw err;
+      }
+    }
 
     res.status(201).json({ success: true, data: invoice });
   } catch (err) { next(err); }
@@ -143,16 +189,17 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
 
     const {
       customerId, customerName, customerAddress, customerEmail, customerPhone,
-      dueDate, notes, items,
+      dueDate, notes,
     } = req.body;
+    const items = await validateInvoiceInput(existing.companyId, req.body);
 
     let subtotal = 0;
-    for (const it of items) subtotal += Number(it.quantity) * Number(it.unitPrice);
+    for (const it of items) subtotal += it.quantity * it.unitPrice;
     const total = subtotal;
 
-    await prisma.invoiceItem.deleteMany({ where: { invoiceId: existing.id } });
-
-    const updated = await prisma.invoice.update({
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.invoiceItem.deleteMany({ where: { invoiceId: existing.id } });
+      return tx.invoice.update({
       where: { id: existing.id },
       data: {
         customerId: customerId || null,
@@ -165,16 +212,17 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
         subtotal,
         total,
         items: {
-          create: items.map((it: any) => ({
-            productId: it.productId || null,
+          create: items.map((it) => ({
+            productId: it.productId,
             description: it.description,
-            quantity: Number(it.quantity),
-            unitPrice: Number(it.unitPrice),
-            total: Number(it.quantity) * Number(it.unitPrice),
+            quantity: it.quantity,
+            unitPrice: it.unitPrice,
+            total: it.quantity * it.unitPrice,
           })),
         },
       },
       include: { items: true },
+      });
     });
 
     res.json({ success: true, data: updated });
@@ -182,17 +230,12 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
 });
 
 // ---------- FINALIZE ----------
-// IMPORTANT: this handler validates ONLY:
-//   1. Invoice is in draft status
-//   2. There is enough actual stock (product.quantity >= requested quantity)
-//   3. There are enough batch quantities to cover the sale via FIFO
-//
-// It MUST NOT block the sale based on the product's reorderPoint.
-// The reorder point is a WARNING threshold shown in the UI, not a
-// hard limit on selling available stock.
+// Validates only that the invoice is a draft and that the invoice's location
+// has enough stock (FIFO over its batches). It must NOT block a sale because
+// of the reorder point — that is a warning shown in the UI, not a limit.
 router.post('/:id/finalize', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const companyId = req.user?.companyId!;
+    const companyId = req.user!.companyId;
     const invoice = await prisma.invoice.findFirst({
       where: { id: req.params.id, companyId },
       include: { items: true },
@@ -203,172 +246,91 @@ router.post('/:id/finalize', async (req: Request, res: Response, next: NextFunct
     }
 
     await prisma.$transaction(async (tx) => {
-      let totalCogs = 0;
+      // Claim the draft first so a double click cannot finalize it twice.
+      const claimed = await tx.invoice.updateMany({
+        where: { id: invoice.id, status: 'draft' },
+        data: { status: 'unpaid', finalizedAt: new Date() },
+      });
+      if (claimed.count === 0) throw badRequest('This invoice was already finalized');
 
+      let totalCogs = 0;
+      const productIds: string[] = [];
       for (const item of invoice.items) {
         if (!item.productId) continue;
+        const product = await tx.product.findFirst({ where: { id: item.productId, companyId } });
+        if (!product) throw notFound(`Product on line "${item.description}" no longer exists`);
 
-        const product = await tx.product.findUnique({ where: { id: item.productId } });
-        if (!product) continue;
-
-        // ========== THE ONLY STOCK VALIDATION ==========
-        // Blocks ONLY when there is genuinely not enough stock.
-        // Does NOT reference product.reorderPoint.
-        if (product.quantity < item.quantity) {
-          throw new Error(
-            `Insufficient stock for ${product.name}. Available: ${product.quantity}`
-          );
-        }
-        // ==============================================
-
-        const batches = await tx.inventoryBatch.findMany({
-          where: {
-            productId: item.productId,
-            quantityRemaining: { gt: 0 },
-            ...(invoice.locationId ? { locationId: invoice.locationId } : {}),
-          },
-          orderBy: { receivedAt: 'asc' }, // FIFO
-        });
-
-        let remaining = item.quantity;
-        let productBalance = product.quantity;
-
-        for (const batch of batches) {
-          if (remaining <= 0) break;
-          const consume = Math.min(batch.quantityRemaining, remaining);
-          const cogs = consume * batch.unitCost;
-          totalCogs += cogs;
-
-          await tx.inventoryBatch.update({
-            where: { id: batch.id },
-            data: { quantityRemaining: batch.quantityRemaining - consume },
-          });
-
-          productBalance -= consume;
-
-          await tx.stockMovement.create({
-            data: {
-              companyId,
-              locationId: invoice.locationId,
-              productId: item.productId,
-              batchId: batch.id,
-              type: 'sale',
-              quantity: -consume,
-              balance: productBalance,
-              unitCost: batch.unitCost,
-              totalCost: cogs,
-              reference: invoice.invoiceNumber,
-            },
-          });
-
-          remaining -= consume;
-        }
-
-        if (remaining > 0) {
-          throw new Error(`Insufficient batch stock for ${product.name}`);
-        }
-
-        await tx.product.update({
-          where: { id: item.productId },
-          data: { quantity: product.quantity - item.quantity },
-        });
-      }
-
-      // Recompute product totalCostValue from remaining batches
-      const touched = Array.from(
-        new Set(invoice.items.map((i) => i.productId).filter(Boolean))
-      ) as string[];
-      for (const pid of touched) {
-        const remainingBatches = await tx.inventoryBatch.findMany({
-          where: { productId: pid, quantityRemaining: { gt: 0 } },
-        });
-        const totalValue = remainingBatches.reduce(
-          (s, b) => s + b.quantityRemaining * b.unitCost,
-          0
-        );
-        await tx.product.update({
-          where: { id: pid },
-          data: { totalCostValue: totalValue },
-        });
-      }
-
-      // Revenue
-      const salesAccount = await findOrCreateAccount(tx, companyId, 'Sales Revenue', 'revenue');
-      const arAccount = await findOrCreateAccount(tx, companyId, 'Accounts Receivable', 'asset');
-
-      await tx.transaction.create({
-        data: {
+        const { totalCost } = await consumeFifo(tx, {
           companyId,
           locationId: invoice.locationId,
-          accountId: salesAccount.id,
+          productId: product.id,
+          productName: product.name,
+          quantity: item.quantity,
           type: 'sale',
-          description: `Invoice ${invoice.invoiceNumber}`,
-          amount: invoice.total,
-          date: new Date(),
-        },
-      });
-      await tx.account.update({
-        where: { id: salesAccount.id },
-        data: { balance: { increment: invoice.total } },
-      });
-      await tx.account.update({
-        where: { id: arAccount.id },
-        data: { balance: { increment: invoice.total } },
-      });
-
-      // COGS
-      if (totalCogs > 0) {
-        const cogsAccount = await findOrCreateAccount(tx, companyId, 'Cost of Goods Sold', 'expense');
-        const inventoryAccount = await findOrCreateAccount(tx, companyId, 'Inventory', 'asset');
-
-        await tx.transaction.create({
-          data: {
-            companyId,
-            locationId: invoice.locationId,
-            accountId: cogsAccount.id,
-            type: 'cogs',
-            description: `COGS for ${invoice.invoiceNumber}`,
-            amount: totalCogs,
-            date: new Date(),
-          },
+          reference: invoice.invoiceNumber,
         });
-        await tx.account.update({
-          where: { id: cogsAccount.id },
-          data: { balance: { increment: totalCogs } },
-        });
-        await tx.account.update({
-          where: { id: inventoryAccount.id },
-          data: { balance: { decrement: totalCogs } },
-        });
+        totalCogs += totalCost;
+        productIds.push(product.id);
       }
+      await syncProductTotals(tx, companyId, productIds);
 
-      await tx.invoice.update({
-        where: { id: invoice.id },
-        data: { status: 'unpaid', finalizedAt: new Date() },
+      // Dr Accounts Receivable / Cr Sales Revenue, and Dr COGS / Cr Inventory
+      const ar = await systemAccount(tx, companyId, 'ar');
+      const sales = await systemAccount(tx, companyId, 'sales');
+      const cogs = await systemAccount(tx, companyId, 'cogs');
+      const inventory = await systemAccount(tx, companyId, 'inventory');
+      await postJournal(tx, {
+        companyId,
+        locationId: invoice.locationId,
+        description: `Invoice ${invoice.invoiceNumber}`,
+        sourceType: 'invoice',
+        sourceId: invoice.id,
+        reference: invoice.invoiceNumber,
+        createdById: req.user!.id,
+        lines: [
+          { accountId: ar.id, debit: invoice.total },
+          { accountId: sales.id, credit: invoice.total },
+          { accountId: cogs.id, debit: totalCogs },
+          { accountId: inventory.id, credit: totalCogs },
+        ],
       });
     });
 
     res.json({ success: true });
-  } catch (err: any) {
-    if (err.message?.startsWith('Insufficient')) {
-      return res.status(400).json({ success: false, message: err.message });
-    }
-    next(err);
-  }
+  } catch (err) { next(err); }
 });
 
 // ---------- RECORD PAYMENT ----------
 router.post('/:id/payment', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const companyId = req.user?.companyId!;
-    const { amount, method = 'cash', reference, notes } = req.body;
+    const { method = 'cash', reference, notes } = req.body;
+    const amount = parsePositiveAmount(req.body?.amount);
 
     const invoice = await prisma.invoice.findFirst({
       where: { id: req.params.id, companyId },
     });
     if (!invoice) return res.status(404).json({ success: false, message: 'Not found' });
 
-    const newPaid = invoice.amountPaid + Number(amount);
+    if (!PAYABLE_STATUSES.includes(invoice.status)) {
+      const reason =
+        invoice.status === 'draft' ? 'Finalize the invoice before recording a payment' :
+        invoice.status === 'paid' ? 'This invoice is already fully paid' :
+        `Payments cannot be recorded on a ${invoice.status} invoice`;
+      throw badRequest(reason);
+    }
+    const balance = invoice.total - invoice.amountPaid;
+    if (amount > balance + 0.01) {
+      throw badRequest(`Amount is more than the balance due (${balance.toFixed(2)})`);
+    }
+
+    // Validate the receiving account before writing anything.
+    const receiveAccount = await resolvePaymentAccount(prisma, companyId, {
+      accountId: req.body?.accountId,
+      account: req.body?.account,
+    });
+
+    const newPaid = invoice.amountPaid + amount;
     let newStatus = invoice.status;
     if (newPaid >= invoice.total - 0.01) newStatus = 'paid';
     else if (newPaid > 0) newStatus = 'partially_paid';
@@ -379,7 +341,7 @@ router.post('/:id/payment', async (req: Request, res: Response, next: NextFuncti
           companyId,
           locationId: invoice.locationId,
           invoiceId: invoice.id,
-          amount: Number(amount),
+          amount,
           method,
           reference,
           notes,
@@ -391,27 +353,20 @@ router.post('/:id/payment', async (req: Request, res: Response, next: NextFuncti
         data: { amountPaid: newPaid, status: newStatus },
       });
 
-      const cashAccount = await findOrCreateAccount(tx, companyId, 'Cash', 'asset');
-      const arAccount = await findOrCreateAccount(tx, companyId, 'Accounts Receivable', 'asset');
-
-      await tx.transaction.create({
-        data: {
-          companyId,
-          locationId: invoice.locationId,
-          accountId: cashAccount.id,
-          type: 'payment',
-          description: `Payment for ${invoice.invoiceNumber}`,
-          amount: Number(amount),
-          date: new Date(),
-        },
-      });
-      await tx.account.update({
-        where: { id: cashAccount.id },
-        data: { balance: { increment: Number(amount) } },
-      });
-      await tx.account.update({
-        where: { id: arAccount.id },
-        data: { balance: { decrement: Number(amount) } },
+      // Dr Cash-or-Bank / Cr Accounts Receivable
+      const ar = await systemAccount(tx, companyId, 'ar');
+      await postJournal(tx, {
+        companyId,
+        locationId: invoice.locationId,
+        description: `Payment for ${invoice.invoiceNumber}`,
+        sourceType: 'invoice_payment',
+        sourceId: invoice.id,
+        reference: reference || invoice.invoiceNumber,
+        createdById: req.user!.id,
+        lines: [
+          { accountId: receiveAccount.id, debit: amount },
+          { accountId: ar.id, credit: amount },
+        ],
       });
     });
 
@@ -420,9 +375,16 @@ router.post('/:id/payment', async (req: Request, res: Response, next: NextFuncti
 });
 
 // ---------- CANCEL ----------
+// Reverses a finalized invoice exactly:
+//  - stock goes back into the batches it was sold from (same cost layers)
+//  - revenue and COGS are reversed with negative 'sale' / 'cogs' entries so
+//    every report that sums them nets the cancellation out
+//  - receivables are reduced only by what was still owed
+//  - money already received is refunded from the chosen cash/bank account
+//    (refundAccountId is required when the invoice has payments)
 router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const companyId = req.user?.companyId!;
+    const companyId = req.user!.companyId;
     const invoice = await prisma.invoice.findFirst({
       where: { id: req.params.id, companyId },
       include: { items: true },
@@ -432,107 +394,93 @@ router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunctio
       return res.status(400).json({ success: false, message: 'Already cancelled' });
     }
 
+    const paid = Math.round(invoice.amountPaid * 100) / 100;
+    let refundAccount: any = null;
+    if (invoice.finalizedAt && paid > 0) {
+      if (!req.body?.refundAccountId) {
+        throw badRequest(
+          `The customer has paid ${paid.toFixed(2)} on this invoice. ` +
+            'Choose the cash or bank account the refund is paid from.'
+        );
+      }
+      refundAccount = await resolvePaymentAccount(prisma, companyId, { accountId: req.body.refundAccountId });
+    }
+
     await prisma.$transaction(async (tx) => {
-      if (invoice.finalizedAt) {
-        const movements = await tx.stockMovement.findMany({
-          where: { companyId, reference: invoice.invoiceNumber, type: 'sale' },
-        });
+      const claimed = await tx.invoice.updateMany({
+        where: { id: invoice.id, status: { not: 'cancelled' } },
+        data: { status: 'cancelled' },
+      });
+      if (claimed.count === 0) throw badRequest('Already cancelled');
+      if (!invoice.finalizedAt) return; // a draft has no stock or accounting to reverse
 
-        let totalCogsReversed = 0;
-        for (const m of movements) {
-          totalCogsReversed += m.totalCost;
-
-          if (m.batchId) {
-            const batch = await tx.inventoryBatch.findUnique({ where: { id: m.batchId } });
-            if (batch) {
-              await tx.inventoryBatch.update({
-                where: { id: batch.id },
-                data: { quantityRemaining: batch.quantityRemaining + Math.abs(m.quantity) },
-              });
-            }
-          }
-
-          const product = await tx.product.findUnique({ where: { id: m.productId } });
-          if (product) {
-            await tx.product.update({
-              where: { id: product.id },
-              data: {
-                quantity: product.quantity + Math.abs(m.quantity),
-                totalCostValue: product.totalCostValue + m.totalCost,
-              },
-            });
-          }
-
-          await tx.stockMovement.create({
-            data: {
-              companyId,
-              locationId: m.locationId,
-              productId: m.productId,
-              batchId: m.batchId,
-              type: 'return',
-              quantity: Math.abs(m.quantity),
-              balance: 0,
-              unitCost: m.unitCost,
-              totalCost: m.totalCost,
-              reference: invoice.invoiceNumber,
-              notes: 'Cancelled invoice reversal',
-            },
+      // 1. Stock back into the original batches
+      const saleMovements = await tx.stockMovement.findMany({
+        where: { companyId, reference: invoice.invoiceNumber, type: 'sale' },
+      });
+      let cogsReversed = 0;
+      const productIds: string[] = [];
+      for (const m of saleMovements) {
+        const qty = Math.abs(m.quantity);
+        if (m.batchId) {
+          await restoreToBatch(tx, {
+            companyId, batchId: m.batchId, quantity: qty, type: 'return',
+            reference: invoice.invoiceNumber, notes: 'Cancelled invoice',
+          });
+        } else {
+          // Sales made before batches existed: return as a new layer at the sale's cost.
+          await addStock(tx, {
+            companyId, locationId: m.locationId ?? invoice.locationId, productId: m.productId,
+            quantity: qty, unitCost: m.unitCost, type: 'return',
+            reference: invoice.invoiceNumber, notes: 'Cancelled invoice',
           });
         }
+        cogsReversed += m.totalCost;
+        productIds.push(m.productId);
+      }
+      await syncProductTotals(tx, companyId, productIds);
 
-        const salesAccount = await findOrCreateAccount(tx, companyId, 'Sales Revenue', 'revenue');
-        const arAccount = await findOrCreateAccount(tx, companyId, 'Accounts Receivable', 'asset');
+      // 2. One reversing entry:
+      //    Dr Sales Revenue (total) + Dr Inventory (cost restored)
+      //    Cr Accounts Receivable (still owed) + Cr Cash/Bank (refund) + Cr COGS (cost)
+      const outstanding = Math.max(0, Math.round((invoice.total - invoice.amountPaid) * 100) / 100);
+      const refundNow = paid > 0 && refundAccount ? paid : 0;
+      const ar = await systemAccount(tx, companyId, 'ar');
+      const sales = await systemAccount(tx, companyId, 'sales');
+      const cogs = await systemAccount(tx, companyId, 'cogs');
+      const inventory = await systemAccount(tx, companyId, 'inventory');
+      await postJournal(tx, {
+        companyId,
+        locationId: invoice.locationId,
+        description: `Cancellation of ${invoice.invoiceNumber}`,
+        sourceType: 'invoice_cancel',
+        sourceId: invoice.id,
+        reference: invoice.invoiceNumber,
+        createdById: req.user!.id,
+        lines: [
+          { accountId: sales.id, debit: invoice.total },
+          { accountId: inventory.id, debit: cogsReversed },
+          { accountId: ar.id, credit: outstanding },
+          ...(refundNow > 0 ? [{ accountId: refundAccount.id, credit: refundNow }] : []),
+          { accountId: cogs.id, credit: cogsReversed },
+        ],
+      });
 
-        await tx.transaction.create({
+      // 3. Record the refund in the invoice payment history
+      if (paid > 0 && refundAccount) {
+        await tx.payment.create({
           data: {
             companyId,
             locationId: invoice.locationId,
-            accountId: salesAccount.id,
-            type: 'refund',
-            description: `Cancellation of ${invoice.invoiceNumber}`,
-            amount: -invoice.total,
-            date: new Date(),
+            invoiceId: invoice.id,
+            amount: -paid,
+            method: 'refund',
+            reference: req.body?.reference || null,
+            notes: `Refund on cancellation (${refundAccount.name})`,
           },
         });
-        await tx.account.update({
-          where: { id: salesAccount.id },
-          data: { balance: { decrement: invoice.total } },
-        });
-        await tx.account.update({
-          where: { id: arAccount.id },
-          data: { balance: { decrement: invoice.total } },
-        });
-
-        if (totalCogsReversed > 0) {
-          const cogsAccount = await findOrCreateAccount(tx, companyId, 'Cost of Goods Sold', 'expense');
-          const inventoryAccount = await findOrCreateAccount(tx, companyId, 'Inventory', 'asset');
-
-          await tx.transaction.create({
-            data: {
-              companyId,
-              locationId: invoice.locationId,
-              accountId: cogsAccount.id,
-              type: 'refund',
-              description: `COGS reversal for ${invoice.invoiceNumber}`,
-              amount: -totalCogsReversed,
-              date: new Date(),
-            },
-          });
-          await tx.account.update({
-            where: { id: cogsAccount.id },
-            data: { balance: { decrement: totalCogsReversed } },
-          });
-          await tx.account.update({
-            where: { id: inventoryAccount.id },
-            data: { balance: { increment: totalCogsReversed } },
-          });
-        }
+        await tx.invoice.update({ where: { id: invoice.id }, data: { amountPaid: 0 } });
       }
-
-      await tx.invoice.update({
-        where: { id: invoice.id },
-        data: { status: 'cancelled' },
-      });
     });
 
     res.json({ success: true });

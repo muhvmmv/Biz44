@@ -1,37 +1,24 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
-import { resolveLocation, locationWhere } from '../../middleware/locationAuth';
-import { PrismaClient } from '@prisma/client';
+import { resolveLocation, locationWhere, guardRecordLocation } from '../../middleware/locationAuth';
 
-const prisma = new PrismaClient();
+import { prisma } from '../../lib/prisma';
+import { resolvePaymentAccount, parsePositiveAmount } from '../../lib/accounts';
+import { postJournal, systemAccount } from '../../lib/ledger';
+import { purchaseBalance, purchaseStatus, returnToSupplier } from './purchase.service';
 const router = Router();
 
 router.use(authenticate);
 
-async function findOrCreateAccount(
-  tx: any,
-  companyId: string,
-  name: string,
-  type: string
-) {
-  const existing = await tx.account.findFirst({ where: { companyId, name } });
-  if (existing) return existing;
-  return tx.account.create({ data: { companyId, name, type, balance: 0 } });
-}
+// Every /:id route: the purchase must belong to this company and to a
+// location the user can access.
+router.param(
+  'id',
+  guardRecordLocation((id, companyId) =>
+    prisma.purchase.findFirst({ where: { id, companyId }, select: { locationId: true } })
+  )
+);
 
-function computeStatus(
-  total: number,
-  amountPaid: number,
-  dueDate: Date | null
-): string {
-  if (amountPaid >= total - 0.01) return 'paid';
-  if (amountPaid > 0) {
-    if (dueDate && new Date() > dueDate) return 'overdue';
-    return 'partially_paid';
-  }
-  if (dueDate && new Date() > dueDate) return 'overdue';
-  return 'unpaid';
-}
 
 // ---------- LIST ----------
 // Query params: status (paid|unpaid|partially_paid|overdue|all), supplierId, from, to
@@ -82,6 +69,7 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
         id: true,
         total: true,
         amountPaid: true,
+        returnedAmount: true,
         status: true,
         dueDate: true,
       },
@@ -94,7 +82,7 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
     let overdueCount = 0;
 
     for (const p of purchases) {
-      const balance = p.total - p.amountPaid;
+      const balance = purchaseBalance(p);
       if (balance > 0.01) {
         outstanding += balance;
         unpaidCount += 1;
@@ -134,7 +122,15 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
           orderBy: { paidAt: 'desc' },
         },
         batches: {
-          select: { id: true, quantityReceived: true, unitCost: true },
+          select: {
+            id: true,
+            productId: true,
+            quantityReceived: true,
+            quantityRemaining: true,
+            unitCost: true,
+            product: { select: { name: true } },
+          },
+          orderBy: { createdAt: 'asc' },
         },
       },
     });
@@ -149,17 +145,12 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 router.post('/:id/pay', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const companyId = req.user!.companyId;
-    const { amount, method = 'cash', account = 'Cash', reference, notes } = req.body as {
-      amount: number;
+    const { method = 'cash', reference, notes } = req.body as {
       method?: string;
-      account?: string;
       reference?: string;
       notes?: string;
     };
-
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ success: false, message: 'Invalid payment amount' });
-    }
+    const amount = parsePositiveAmount(req.body?.amount);
 
     const purchase = await prisma.purchase.findFirst({
       where: { id: req.params.id, companyId },
@@ -168,14 +159,26 @@ router.post('/:id/pay', resolveLocation, async (req: Request, res: Response, nex
       return res.status(404).json({ success: false, message: 'Purchase not found' });
     }
 
-    const balance = purchase.total - purchase.amountPaid;
+    const balance = purchaseBalance(purchase);
     if (balance <= 0.01) {
       return res.status(400).json({ success: false, message: 'This purchase is already fully paid' });
     }
 
-    const payAmount = Math.min(Number(amount), balance);
+    if (amount > balance + 0.01) {
+      return res.status(400).json({
+        success: false,
+        message: `Amount is more than the balance owed (${balance.toFixed(2)})`,
+      });
+    }
+    const payAmount = Math.min(amount, balance);
+
+    // Validate the paying account before writing anything.
+    const payFromAccount = await resolvePaymentAccount(prisma, companyId, {
+      accountId: req.body?.accountId,
+      account: req.body?.account,
+    });
     const newPaid = purchase.amountPaid + payAmount;
-    const newStatus = computeStatus(purchase.total, newPaid, purchase.dueDate);
+    const newStatus = purchaseStatus({ ...purchase, amountPaid: newPaid });
 
     const result = await prisma.$transaction(async (tx) => {
       // 1. Record the payment
@@ -186,7 +189,7 @@ router.post('/:id/pay', resolveLocation, async (req: Request, res: Response, nex
           purchaseId: purchase.id,
           amount: payAmount,
           method,
-          account,
+          account: payFromAccount.name,
           reference,
           notes,
         },
@@ -198,40 +201,20 @@ router.post('/:id/pay', resolveLocation, async (req: Request, res: Response, nex
         data: { amountPaid: newPaid, status: newStatus },
       });
 
-      // 3. Accounting: AP down, Cash down
-      const apAccount = await findOrCreateAccount(tx, companyId, 'Accounts Payable', 'liability');
-      const cashAccount = await findOrCreateAccount(tx, companyId, account, 'asset');
-
-      await tx.transaction.create({
-        data: {
-          companyId,
-          locationId: purchase.locationId,
-          accountId: apAccount.id,
-          type: 'payment',
-          description: `Supplier payment${purchase.reference ? ` ${purchase.reference}` : ''}`,
-          amount: -payAmount,
-          date: new Date(),
-        },
-      });
-      await tx.account.update({
-        where: { id: apAccount.id },
-        data: { balance: { decrement: payAmount } },
-      });
-
-      await tx.transaction.create({
-        data: {
-          companyId,
-          locationId: purchase.locationId,
-          accountId: cashAccount.id,
-          type: 'payment',
-          description: `Supplier payment${purchase.reference ? ` ${purchase.reference}` : ''}`,
-          amount: payAmount,
-          date: new Date(),
-        },
-      });
-      await tx.account.update({
-        where: { id: cashAccount.id },
-        data: { balance: { decrement: payAmount } },
+      // 3. Accounting: Dr Accounts Payable / Cr Cash-or-Bank
+      const ap = await systemAccount(tx, companyId, 'ap');
+      await postJournal(tx, {
+        companyId,
+        locationId: purchase.locationId,
+        description: `Supplier payment${purchase.reference ? ` ${purchase.reference}` : ''}`,
+        sourceType: 'purchase_payment',
+        sourceId: purchase.id,
+        reference: reference || purchase.reference,
+        createdById: req.user!.id,
+        lines: [
+          { accountId: ap.id, debit: payAmount },
+          { accountId: payFromAccount.id, credit: payAmount },
+        ],
       });
 
       return payment;
@@ -242,10 +225,30 @@ router.post('/:id/pay', resolveLocation, async (req: Request, res: Response, nex
       data: {
         payment: result,
         amountPaid: newPaid,
-        outstanding: purchase.total - newPaid,
+        outstanding: purchaseBalance({ ...purchase, amountPaid: newPaid }),
         status: newStatus,
       },
     });
+  } catch (err) { next(err); }
+});
+
+// ---------- RETURN GOODS TO SUPPLIER ----------
+// body: { batchId, quantity, refundAccountId?, reference?, notes? }
+router.post('/:id/return', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { batchId, quantity, refundAccountId, reference, notes } = req.body || {};
+    if (!batchId) return res.status(400).json({ success: false, message: 'Choose which delivery line to return' });
+    const result = await returnToSupplier({
+      companyId: req.user!.companyId,
+      userId: req.user!.id,
+      purchaseId: req.params.id,
+      batchId,
+      quantity,
+      refundAccountId,
+      reference,
+      notes,
+    });
+    res.json({ success: true, data: result });
   } catch (err) { next(err); }
 });
 

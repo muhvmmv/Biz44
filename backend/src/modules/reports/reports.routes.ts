@@ -1,32 +1,21 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/auth';
-import { PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient();
+import { prisma } from '../../lib/prisma';
+import { stockByProduct } from '../../lib/inventory';
+import { resolveLocation, reportLocationIds } from '../../middleware/locationAuth';
+import { monthlyPnl, profitAndLoss } from '../../lib/reports';
 const router = Router();
 
 router.use(authenticate);
 
-// SALES BY MONTH (last 12 months)
-router.get('/sales-by-month', async (req, res, next) => {
+// SALES BY MONTH — revenue per month from the ledger (finalized invoices
+// minus cancellations), the same figure as the P&L and dashboard.
+router.get('/sales-by-month', resolveLocation, async (req, res, next) => {
   try {
-    const companyId = req.user?.companyId!;
-    const invoices = await prisma.invoice.findMany({
-      where: { companyId, status: { not: 'draft' }, finalizedAt: { not: null } },
-      select: { total: true, finalizedAt: true },
-    });
-
-    const byMonth: Record<string, number> = {};
-    for (const inv of invoices) {
-      if (!inv.finalizedAt) continue;
-      const key = `${inv.finalizedAt.getFullYear()}-${String(inv.finalizedAt.getMonth() + 1).padStart(2, '0')}`;
-      byMonth[key] = (byMonth[key] || 0) + inv.total;
-    }
-    const data = Object.entries(byMonth)
-      .map(([month, total]) => ({ month, total }))
-      .sort((a, b) => a.month.localeCompare(b.month));
-
-    res.json({ success: true, data });
+    const months = Math.min(Math.max(parseInt(String(req.query.months || '12')) || 12, 1), 24);
+    const rows = await monthlyPnl(req.user!.companyId, months, await reportLocationIds(req));
+    res.json({ success: true, data: rows.map((r) => ({ month: r.key, total: r.revenue })) });
   } catch (err) { next(err); }
 });
 
@@ -35,7 +24,7 @@ router.get('/sales-by-product', async (req, res, next) => {
   try {
     const companyId = req.user?.companyId!;
     const items = await prisma.invoiceItem.findMany({
-      where: { invoice: { companyId, status: { not: 'draft' } } },
+      where: { invoice: { companyId, status: { notIn: ['draft', 'cancelled'] } } },
       include: { product: { select: { name: true, sku: true } } },
     });
 
@@ -63,7 +52,7 @@ router.get('/top-customers', async (req, res, next) => {
   try {
     const companyId = req.user?.companyId!;
     const invoices = await prisma.invoice.findMany({
-      where: { companyId, status: { not: 'draft' } },
+      where: { companyId, status: { notIn: ['draft', 'cancelled'] } },
       include: { customer: { select: { firstName: true, lastName: true, id: true } } },
     });
 
@@ -89,37 +78,40 @@ router.get('/top-customers', async (req, res, next) => {
 });
 
 // INVENTORY VALUATION
-router.get('/inventory-valuation', async (req, res, next) => {
+// Value at cost comes from the actual batches (each at its own purchase or
+// production cost), not quantity × latest cost.
+router.get('/inventory-valuation', resolveLocation, async (req, res, next) => {
   try {
+    const companyId = req.user!.companyId;
     const products = await prisma.product.findMany({
-      where: { companyId: req.user?.companyId },
-      select: { name: true, sku: true, quantity: true, cost: true, price: true },
+      where: { companyId },
+      select: { id: true, name: true, sku: true, cost: true, price: true },
+      orderBy: { name: 'asc' },
     });
-    const data = products.map((p) => ({
-      ...p,
-      valueAtCost: p.quantity * p.cost,
-      valueAtPrice: p.quantity * p.price,
-    }));
+    const stock = await stockByProduct(prisma, companyId, req.locationId ?? req.allowedLocationIds);
+    const data = products.map(({ id, ...p }) => {
+      const s = stock.get(id) || { quantity: 0, value: 0 };
+      return {
+        ...p,
+        quantity: s.quantity,
+        valueAtCost: s.value,
+        valueAtPrice: Math.round(s.quantity * p.price * 100) / 100,
+      };
+    });
     res.json({ success: true, data });
   } catch (err) { next(err); }
 });
 
-// EXPENSES BY CATEGORY
-router.get('/expenses-by-category', async (req, res, next) => {
+// EXPENSES BY CATEGORY — operating expenses from the P&L (all time unless from/to given).
+router.get('/expenses-by-category', resolveLocation, async (req, res, next) => {
   try {
-    const companyId = req.user?.companyId!;
-    const rows = await prisma.transaction.groupBy({
-      by: ['accountId'],
-      where: { companyId, type: 'expense' },
-      _sum: { amount: true },
+    const from = req.query.from ? new Date(String(req.query.from)) : undefined;
+    const to = req.query.to ? new Date(String(req.query.to)) : undefined;
+    const pnl = await profitAndLoss(req.user!.companyId, { from, to, locationIds: await reportLocationIds(req) });
+    res.json({
+      success: true,
+      data: pnl.expenseBreakdown.map((e) => ({ name: e.account, total: e.amount })),
     });
-    const accounts = await prisma.account.findMany({ where: { companyId } });
-    const nameMap = new Map(accounts.map((a) => [a.id, a.name]));
-    const data = rows.map((r) => ({
-      name: nameMap.get(r.accountId) || 'Unknown',
-      total: r._sum.amount || 0,
-    })).sort((a, b) => b.total - a.total);
-    res.json({ success: true, data });
   } catch (err) { next(err); }
 });
 

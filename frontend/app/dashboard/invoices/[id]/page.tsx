@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import PaymentAccountSelect from "@/components/ui/PaymentAccountSelect";
+import Dialog from "@/components/ui/Dialog";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
@@ -8,7 +10,6 @@ import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import Skeleton from "@/components/ui/Skeleton";
-import { Card, CardContent } from "@/components/ui/Card";
 import NumericInput from "@/components/ui/NumericInput";
 import {
   CheckCircle2,
@@ -79,9 +80,14 @@ export default function InvoiceDetailPage() {
   const [showPayment, setShowPayment] = useState(false);
   const [payAmount, setPayAmount] = useState(0);
   const [payMethod, setPayMethod] = useState("cash");
+  const [payAccountId, setPayAccountId] = useState("");
   const [payReference, setPayReference] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [showCancel, setShowCancel] = useState(false);
+  const [refundAccountId, setRefundAccountId] = useState("");
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState("");
 
   const load = useCallback(async () => {
     const [invRes, bizRes] = await Promise.all([
@@ -127,18 +133,25 @@ export default function InvoiceDetailPage() {
     }
   };
 
-  const cancel = async () => {
-    if (
-      !confirm(
-        "Cancel this invoice? Stock will be reversed if it was finalized."
-      )
-    )
-      return;
+  const cancel = () => {
+    setCancelError("");
+    setShowCancel(true);
+  };
+
+  const confirmCancel = async () => {
+    setCancelError("");
+    setCancelling(true);
     try {
-      await apiFetch(`/invoices/${id}/cancel`, { method: "POST" });
+      await apiFetch(`/invoices/${id}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ refundAccountId: refundAccountId || undefined }),
+      });
+      setShowCancel(false);
       load();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Failed");
+      setCancelError(err instanceof Error ? err.message : "Could not cancel the invoice");
+    } finally {
+      setCancelling(false);
     }
   };
 
@@ -152,6 +165,7 @@ export default function InvoiceDetailPage() {
         body: JSON.stringify({
           amount: payAmount,
           method: payMethod,
+          accountId: payAccountId,
           reference: payReference || undefined,
         }),
       });
@@ -241,6 +255,11 @@ export default function InvoiceDetailPage() {
                   </Button>
                 </>
               )}
+              {invoice.status === "paid" && (
+                <Button variant="outline" onClick={cancel}>
+                  <XCircle className="w-4 h-4 mr-1" /> Cancel
+                </Button>
+              )}
               {["unpaid", "partially_paid", "overdue"].includes(invoice.status) && (
                 <>
                   <Button variant="outline" onClick={cancel}>
@@ -265,10 +284,10 @@ export default function InvoiceDetailPage() {
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-6 pb-8 border-b border-border-soft">
           <div>
             <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-rose-vale flex items-center justify-center text-white font-extrabold">
+              <div className="w-10 h-10 rounded-lg bg-brand flex items-center justify-center text-white font-extrabold">
                 {businessName.charAt(0).toUpperCase()}
               </div>
-              <h2 className="text-2xl font-bold text-navy">{businessName}</h2>
+              <h2 className="text-2xl font-bold text-charcoal">{businessName}</h2>
             </div>
             <div className="text-sm text-ink-soft space-y-0.5">
               {businessAddress && <p>{businessAddress}</p>}
@@ -279,7 +298,7 @@ export default function InvoiceDetailPage() {
           </div>
 
           <div className="sm:text-right">
-            <h1 className="text-3xl font-extrabold tracking-tight text-navy">
+            <h1 className="text-3xl font-extrabold tracking-tight text-charcoal">
               INVOICE
             </h1>
             <p className="text-lg font-bold text-ink mt-1">
@@ -393,7 +412,7 @@ export default function InvoiceDetailPage() {
                 <span className="text-ink">{format(invoice.taxTotal)}</span>
               </div>
             )}
-            <div className="flex justify-between text-lg font-bold pt-3 border-t border-border-soft text-navy">
+            <div className="flex justify-between text-lg font-bold pt-3 border-t border-border-soft text-charcoal">
               <span>Total</span>
               <span>{format(invoice.total)}</span>
             </div>
@@ -466,11 +485,11 @@ export default function InvoiceDetailPage() {
         <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-border-soft">
             <div className="p-6 border-b border-border-soft">
-              <h2 className="text-lg font-bold text-navy">Record Payment</h2>
+              <h2 className="text-lg font-bold text-charcoal">Record Payment</h2>
             </div>
             <form onSubmit={recordPayment} className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">
+                <label className="block text-sm font-medium mb-1 text-charcoal">
                   Amount
                 </label>
                 <NumericInput
@@ -485,13 +504,19 @@ export default function InvoiceDetailPage() {
                 </p>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">
+                <label className="block text-sm font-medium mb-1 text-charcoal">
+                  Received into
+                </label>
+                <PaymentAccountSelect value={payAccountId} onChange={setPayAccountId} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1 text-charcoal">
                   Method
                 </label>
                 <select
                   value={payMethod}
                   onChange={(e) => setPayMethod(e.target.value)}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
                 >
                   <option value="cash">Cash</option>
                   <option value="card">Card</option>
@@ -501,13 +526,13 @@ export default function InvoiceDetailPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">
+                <label className="block text-sm font-medium mb-1 text-charcoal">
                   Reference (optional)
                 </label>
                 <input
                   value={payReference}
                   onChange={(e) => setPayReference(e.target.value)}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
                 />
               </div>
               {error && <p className="text-danger text-sm">{error}</p>}
@@ -527,6 +552,37 @@ export default function InvoiceDetailPage() {
           </div>
         </div>
       )}
+
+      <Dialog
+        open={showCancel}
+        onClose={() => setShowCancel(false)}
+        title={`Cancel ${invoice.invoiceNumber}?`}
+        description={
+          invoice.finalizedAt
+            ? "The sale is reversed: stock goes back to the batches it came from, and revenue and cost of goods sold are reversed."
+            : "This draft will be marked as cancelled."
+        }
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setShowCancel(false)}>Keep invoice</Button>
+            <Button variant="danger" onClick={confirmCancel} isLoading={cancelling}>Cancel invoice</Button>
+          </>
+        }
+      >
+        {invoice.finalizedAt && invoice.amountPaid > 0 && (
+          <div className="space-y-3">
+            <p className="text-sm text-ink">
+              The customer has paid <span className="font-semibold">{format(invoice.amountPaid)}</span>. This amount
+              will be recorded as refunded.
+            </p>
+            <div>
+              <label className="block text-sm font-medium mb-1">Refund paid from</label>
+              <PaymentAccountSelect value={refundAccountId} onChange={setRefundAccountId} />
+            </div>
+          </div>
+        )}
+        {cancelError && <p className="text-sm text-danger">{cancelError}</p>}
+      </Dialog>
     </div>
   );
 }

@@ -1,36 +1,64 @@
 @import "tailwindcss";
 
 @theme {
-  /* Biz44 Brand Palette */
-  --color-rose-vale: #AB6B73;
-  --color-rose-dark: #824C54;
-  --color-rose-light: #F1E1E3;
+  /* =====================================================================
+     Biz44 design tokens. Components use these names, never raw hex values.
+     Live reference: /dashboard/design-system
+     ===================================================================== */
 
-  --color-navy: #243447;
-  --color-navy-dark: #1A2735;
-  --color-navy-light: #E7ECF1;
+  /* Brand
+     brand        bright orange — accents only: active indicators, focus rings,
+                  progress, chart highlight, logo. Not for small text on white.
+     brand-dark   deep orange — orange text and links (5.6:1 on white).
+     brand-light  orange tint — selected/active backgrounds.
+     charcoal     near-black — primary buttons, active pills, headings. */
+  --color-brand: #F05A28;
+  --color-brand-dark: #B93D0C;
+  --color-brand-light: #FFF1EA;
 
-  --color-ivory: #FAF8F5;
-  --color-border-soft: #E5DFDC;
+  --color-charcoal: #1C1C1F;
+  --color-charcoal-dark: #0B0B0D;
+  --color-charcoal-light: #EFEFF1;
 
-  --color-ink: #252525;
-  --color-ink-soft: #6B6563;
+  /* Surfaces and lines */
+  --color-ivory: #F5F5F7;          /* page background */
+  --color-surface: #FFFFFF;        /* cards, sidebar, header, inputs */
+  --color-surface-muted: #FAFAFB;  /* table headers, inset panels */
+  --color-border-soft: #E6E6EA;
+  --color-border-strong: #D4D4DA;
 
-  /* Semantic */
-  --color-success: #4F8068;
-  --color-warning: #C49A52;
-  --color-danger: #B94A48;
-  --color-info: #527A9E;
-  --color-gold: #C49A52;
-  --color-terracotta: #B96F5D;
+  /* Text */
+  --color-ink: #1C1C1F;
+  --color-ink-soft: #66666E;       /* secondary text, 5.4:1 on the page */
+  --color-ink-faint: #8E8E96;      /* placeholders only (not for readable text) */
 
-  /* Chart palette */
-  --color-chart-1: #AB6B73;
-  --color-chart-2: #243447;
-  --color-chart-3: #527A9E;
-  --color-chart-4: #4F8068;
-  --color-chart-5: #C49A52;
-  --color-chart-6: #B96F5D;
+  /* Status (kept distinct from the brand orange), each with a soft tint */
+  --color-success: #15803D;
+  --color-success-soft: #ECFDF3;
+  --color-warning: #A16207;
+  --color-warning-soft: #FEF7E6;
+  --color-danger: #B91C1C;
+  --color-danger-soft: #FEF2F2;
+  --color-info: #1D4ED8;
+  --color-info-soft: #EFF4FF;
+
+  /* Chart palette — brand first, then hues that stay distinct from orange */
+  --color-chart-1: #F05A28;
+  --color-chart-2: #1C1C1F;
+  --color-chart-3: #3B82F6;
+  --color-chart-4: #16A34A;
+  --color-chart-5: #A1A1AA;
+  --color-chart-6: #0D9488;
+
+  /* Elevation */
+  --shadow-card: 0 1px 2px rgb(16 16 20 / 0.04), 0 1px 3px rgb(16 16 20 / 0.04);
+  --shadow-raised: 0 4px 12px -2px rgb(16 16 20 / 0.08), 0 2px 4px -2px rgb(16 16 20 / 0.04);
+  --shadow-pop: 0 16px 40px -8px rgb(16 16 20 / 0.18), 0 4px 12px -4px rgb(16 16 20 / 0.08);
+
+  /* Sizes */
+  --spacing-sidebar: 16rem;
+  --spacing-sidebar-collapsed: 4.5rem;
+  --spacing-header: 4rem;
 }
 
 @layer base {
@@ -83,8 +111,11 @@
   }
 }
 
-/* Focus ring uses Rose Vale */
-*:focus-visible {
-  outline: 2px solid var(--color-rose-vale);
-  outline-offset: 2px;
+/* Default keyboard focus ring in the brand orange. It lives in the base
+   layer so components can replace it with their own focus style. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
 }

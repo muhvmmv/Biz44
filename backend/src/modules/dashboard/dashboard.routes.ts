@@ -1,9 +1,13 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
-import { resolveLocation, locationWhere } from '../../middleware/locationAuth';
-import { PrismaClient } from '@prisma/client';
+import { resolveLocation, locationWhere, reportLocationIds } from '../../middleware/locationAuth';
 
-const prisma = new PrismaClient();
+import { prisma } from '../../lib/prisma';
+import { stockByProduct } from '../../lib/inventory';
+import { purchaseBalance } from '../purchases/purchase.service';
+import { profitAndLoss, cashFlow, monthlyPnl } from '../../lib/reports';
+import { listPaymentAccounts } from '../../lib/accounts';
+import { runStockCheck } from '../../lib/stockCheck';
 const router = Router();
 
 router.use(authenticate);
@@ -17,67 +21,49 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
     const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
-    const invoices = await prisma.invoice.findMany({
-      where: { companyId, status: { not: 'draft' }, ...locFilter },
-      include: { items: { include: { product: { select: { name: true } } } } },
-    });
+    // Period for the money figures: the last N months including this one.
+    const months = Math.min(Math.max(parseInt(String(req.query.months || '12')) || 12, 1), 24);
+    const periodStart = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+    const lastMonthEnd = new Date(thisMonthStart.getTime() - 1);
+    const locationIds = await reportLocationIds(req);
 
-    const paidInvoices = invoices.filter((i) => i.status === 'paid' || i.status === 'partially_paid');
+    const [pnl, thisMonth, lastMonth, flow, cashAccounts, invoices] = await Promise.all([
+      profitAndLoss(companyId, { from: periodStart, to: now, locationIds }),
+      profitAndLoss(companyId, { from: thisMonthStart, to: now, locationIds }),
+      profitAndLoss(companyId, { from: lastMonthStart, to: lastMonthEnd, locationIds }),
+      cashFlow(companyId, { from: periodStart, to: now }),
+      listPaymentAccounts(prisma, companyId),
+      prisma.invoice.findMany({
+        where: { companyId, status: { notIn: ['draft', 'cancelled'] }, ...locFilter },
+        include: { items: { include: { product: { select: { name: true } } } } },
+      }),
+    ]);
+
+    // Receivables come from the invoices themselves.
     const unpaidInvoices = invoices.filter((i) => ['unpaid', 'overdue', 'partially_paid'].includes(i.status));
     const overdueInvoices = unpaidInvoices.filter((i) => i.dueDate && new Date(i.dueDate) < now);
     const dueTodayInvoices = unpaidInvoices.filter(
       (i) => i.dueDate && new Date(i.dueDate).toDateString() === now.toDateString()
     );
-
-    const totalRevenue = paidInvoices.reduce((s, i) => s + i.total, 0);
     const outstanding = unpaidInvoices.reduce((s, i) => s + (i.total - i.amountPaid), 0);
 
-    const thisMonthRevenue = invoices
-      .filter((i) => i.finalizedAt && i.finalizedAt >= thisMonthStart)
-      .reduce((s, i) => s + i.total, 0);
-    const lastMonthRevenue = invoices
-      .filter((i) => i.finalizedAt && i.finalizedAt >= lastMonthStart && i.finalizedAt < thisMonthStart)
-      .reduce((s, i) => s + i.total, 0);
-    const revenueChange = lastMonthRevenue > 0
-      ? ((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100
-      : (thisMonthRevenue > 0 ? 100 : 0);
+    const revenueChange = lastMonth.revenue !== 0
+      ? ((thisMonth.revenue - lastMonth.revenue) / Math.abs(lastMonth.revenue)) * 100
+      : thisMonth.revenue > 0 ? 100 : 0;
 
-    const cogsAgg = await prisma.transaction.aggregate({
-      where: { companyId, type: 'cogs', ...locFilter },
-      _sum: { amount: true },
-    });
-    const totalCogs = cogsAgg._sum.amount || 0;
-
-    const opexAgg = await prisma.transaction.aggregate({
-      where: { companyId, type: 'expense', ...locFilter },
-      _sum: { amount: true },
-    });
-    const totalOpex = opexAgg._sum.amount || 0;
-
-    const grossProfit = totalRevenue - totalCogs;
-    const grossMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
-    const netProfit = grossProfit - totalOpex;
-    const netMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
-
-    const paymentsAgg = await prisma.payment.aggregate({
-      where: { companyId, ...locFilter },
-      _sum: { amount: true },
-    });
-    const cashIn = paymentsAgg._sum.amount || 0;
-    const cashOut = totalOpex + totalCogs;
-    const netCash = cashIn - cashOut;
+    const totalCash = Math.round(cashAccounts.reduce((s: number, a: any) => s + a.balance, 0) * 100) / 100;
 
     // ---- Supplier outstanding ----
     const purchases = await prisma.purchase.findMany({
       where: { companyId, ...locFilter },
-      select: { total: true, amountPaid: true, dueDate: true },
+      select: { total: true, amountPaid: true, returnedAmount: true, dueDate: true },
     });
     let supplierOutstanding = 0;
     let supplierUnpaidCount = 0;
     let supplierOverdueAmount = 0;
     let supplierOverdueCount = 0;
     for (const p of purchases) {
-      const bal = p.total - p.amountPaid;
+      const bal = purchaseBalance(p);
       if (bal > 0.01) {
         supplierOutstanding += bal;
         supplierUnpaidCount += 1;
@@ -89,18 +75,25 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
     }
 
     // ---- Inventory ----
+    // Stock comes from batches at the selected location(s), not the
+    // company-wide cache, so a single branch shows its own stock.
     const products = await prisma.product.findMany({
       where: { companyId },
-      select: { quantity: true, reorderPoint: true, price: true, cost: true, totalCostValue: true },
+      select: { id: true, reorderPoint: true },
     });
-    const totalUnits = products.reduce((s, p) => s + p.quantity, 0);
-    const inventoryValue = products.reduce((s, p) => s + p.totalCostValue, 0);
-    const lowStock = products.filter((p) => p.quantity > 0 && p.quantity <= p.reorderPoint).length;
-    const outOfStock = products.filter((p) => p.quantity === 0).length;
+    const stock = await stockByProduct(prisma, companyId, req.locationId ?? req.allowedLocationIds);
+    const qtyOf = (id: string) => stock.get(id)?.quantity ?? 0;
+    const totalUnits = products.reduce((s, p) => s + qtyOf(p.id), 0);
+    const inventoryValue = Math.round(
+      Array.from(stock.values()).reduce((s, v) => s + v.value, 0) * 100
+    ) / 100;
+    const lowStock = products.filter((p) => qtyOf(p.id) > 0 && qtyOf(p.id) <= p.reorderPoint).length;
+    const outOfStock = products.filter((p) => qtyOf(p.id) === 0).length;
 
     // ---- Top products ----
     const productSales: Record<string, number> = {};
     for (const inv of invoices) {
+      if (!inv.finalizedAt || inv.finalizedAt < periodStart) continue;
       for (const item of inv.items) {
         const name = item.product?.name || item.description;
         productSales[name] = (productSales[name] || 0) + item.total;
@@ -114,18 +107,27 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
     res.json({
       success: true,
       data: {
-        revenue: totalRevenue,
+        months,
+        periodStart,
+        revenue: pnl.revenue,
         revenueChange,
-        cogs: totalCogs,
-        grossProfit,
-        grossMargin,
-        opex: totalOpex,
-        netProfit,
-        netMargin,
-        profit: netProfit,
-        profitMargin: netMargin,
-        expenses: totalOpex,
-        netCash,
+        revenueThisMonth: thisMonth.revenue,
+        revenueLastMonth: lastMonth.revenue,
+        cogs: pnl.cogs,
+        grossProfit: pnl.grossProfit,
+        grossMargin: pnl.grossMargin,
+        opex: pnl.totalOpex,
+        netProfit: pnl.netProfit,
+        netMargin: pnl.netMargin,
+        profit: pnl.netProfit,
+        profitMargin: pnl.netMargin,
+        expenses: pnl.totalOpex,
+        // Cash position from the actual cash and bank accounts
+        totalCash,
+        cashAccounts: cashAccounts.map((a: any) => ({ id: a.id, name: a.name, subtype: a.subtype, balance: Math.round(a.balance * 100) / 100 })),
+        cashIn: flow.totalIn,
+        cashOut: flow.totalOut,
+        netCash: flow.net,
         outstanding,
         overdueCount: overdueInvoices.length,
         unpaidCount: unpaidInvoices.length,
@@ -147,57 +149,107 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
 });
 
 // ---------- MONTHLY CHART ----------
+// Revenue, COGS, operating expenses and profit per month, from the ledger.
 router.get('/monthly-chart', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const companyId = req.user?.companyId!;
+    const months = Math.min(Math.max(parseInt(String(req.query.months || '6')) || 6, 1), 24);
+    const data = await monthlyPnl(req.user!.companyId, months, await reportLocationIds(req));
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+});
+
+// ---------- ALERTS ----------
+// Things that need attention, computed from live data (nothing is stored).
+router.get('/alerts', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const companyId = req.user!.companyId;
     const locFilter = locationWhere(req);
-    const months = Math.min(Math.max(parseInt(String(req.query.months || '6')), 1), 12);
     const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    const invoices = await prisma.invoice.findMany({
-      where: { companyId, finalizedAt: { gte: start }, status: { not: 'cancelled' }, ...locFilter },
-      select: { total: true, finalizedAt: true },
-    });
-    const cogsTx = await prisma.transaction.findMany({
-      where: { companyId, type: 'cogs', date: { gte: start }, ...locFilter },
-      select: { amount: true, date: true },
-    });
-    const opexTx = await prisma.transaction.findMany({
-      where: { companyId, type: 'expense', date: { gte: start }, ...locFilter },
-      select: { amount: true, date: true },
-    });
+    const [openInvoices, purchases, products, stock, cashAccounts, stockReport] = await Promise.all([
+      prisma.invoice.findMany({
+        where: { companyId, status: { in: ['unpaid', 'partially_paid', 'overdue'] }, ...locFilter },
+        select: { total: true, amountPaid: true, dueDate: true },
+      }),
+      prisma.purchase.findMany({
+        where: { companyId, ...locFilter },
+        select: { total: true, amountPaid: true, returnedAmount: true, dueDate: true },
+      }),
+      prisma.product.findMany({ where: { companyId }, select: { id: true, reorderPoint: true } }),
+      stockByProduct(prisma, companyId, req.locationId ?? req.allowedLocationIds),
+      listPaymentAccounts(prisma, companyId),
+      runStockCheck(companyId),
+    ]);
 
-    const result: any[] = [];
-    for (let i = months - 1; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      const label = d.toLocaleString('default', { month: 'short' });
+    // `amount` (when present) is shown formatted before `detail` by the client.
+    const alerts: { id: string; severity: 'danger' | 'warning' | 'info'; title: string; detail: string; amount?: number; href: string; count: number }[] = [];
+    const money = (n: number) => Math.round(n * 100) / 100;
 
-      const rev = invoices
-        .filter((inv) => inv.finalizedAt &&
-          `${inv.finalizedAt.getFullYear()}-${String(inv.finalizedAt.getMonth() + 1).padStart(2, '0')}` === key)
-        .reduce((s, i) => s + i.total, 0);
-
-      const cogs = cogsTx
-        .filter((t) => `${t.date.getFullYear()}-${String(t.date.getMonth() + 1).padStart(2, '0')}` === key)
-        .reduce((s, t) => s + t.amount, 0);
-
-      const opex = opexTx
-        .filter((t) => `${t.date.getFullYear()}-${String(t.date.getMonth() + 1).padStart(2, '0')}` === key)
-        .reduce((s, t) => s + t.amount, 0);
-
-      result.push({
-        month: label,
-        revenue: rev,
-        cogs,
-        opex,
-        grossProfit: rev - cogs,
-        netProfit: rev - cogs - opex,
+    const overdue = openInvoices.filter((i) => i.dueDate && i.dueDate < todayStart);
+    if (overdue.length) {
+      alerts.push({
+        id: 'invoices-overdue', severity: 'danger', count: overdue.length,
+        title: `${overdue.length} overdue invoice${overdue.length === 1 ? '' : 's'}`,
+        amount: money(overdue.reduce((s, i) => s + i.total - i.amountPaid, 0)), detail: 'still to collect',
+        href: '/dashboard/accounting/receivable',
+      });
+    }
+    const dueToday = openInvoices.filter((i) => i.dueDate && i.dueDate >= todayStart && i.dueDate <= todayEnd);
+    if (dueToday.length) {
+      alerts.push({
+        id: 'invoices-due-today', severity: 'info', count: dueToday.length,
+        title: `${dueToday.length} invoice${dueToday.length === 1 ? '' : 's'} due today`,
+        amount: money(dueToday.reduce((s, i) => s + i.total - i.amountPaid, 0)), detail: 'expected today',
+        href: '/dashboard/invoices',
+      });
+    }
+    const supplierOverdue = purchases.filter((p) => p.dueDate && p.dueDate < todayStart && purchaseBalance(p) > 0.009);
+    if (supplierOverdue.length) {
+      alerts.push({
+        id: 'suppliers-overdue', severity: 'danger', count: supplierOverdue.length,
+        title: `${supplierOverdue.length} supplier payment${supplierOverdue.length === 1 ? '' : 's'} overdue`,
+        amount: money(supplierOverdue.reduce((s, p) => s + purchaseBalance(p), 0)), detail: 'owed past the due date',
+        href: '/dashboard/accounting/payable',
+      });
+    }
+    const qty = (id: string) => stock.get(id)?.quantity ?? 0;
+    const out = products.filter((p) => p.reorderPoint > 0 && qty(p.id) <= 0).length;
+    const low = products.filter((p) => qty(p.id) > 0 && qty(p.id) <= p.reorderPoint).length;
+    if (out) {
+      alerts.push({
+        id: 'stock-out', severity: 'danger', count: out,
+        title: `${out} product${out === 1 ? '' : 's'} out of stock`,
+        detail: 'Below the reorder point with nothing on hand', href: '/dashboard/inventory/products',
+      });
+    }
+    if (low) {
+      alerts.push({
+        id: 'stock-low', severity: 'warning', count: low,
+        title: `${low} product${low === 1 ? '' : 's'} running low`,
+        detail: 'At or below the reorder point', href: '/dashboard/inventory/products',
+      });
+    }
+    if (stockReport.summary.issues) {
+      alerts.push({
+        id: 'stock-check', severity: 'warning', count: stockReport.summary.issues,
+        title: `Stock check found ${stockReport.summary.issues} problem${stockReport.summary.issues === 1 ? '' : 's'}`,
+        detail: 'Recorded stock disagrees with stock batches', href: '/dashboard/inventory/stock-check',
+      });
+    }
+    const negative = cashAccounts.filter((a: any) => a.balance < -0.009);
+    if (negative.length) {
+      alerts.push({
+        id: 'cash-negative', severity: 'warning', count: negative.length,
+        title: `${negative.map((a: any) => a.name).join(', ')} below zero`,
+        detail: 'Check for a missing payment in, or correct the opening balance', href: '/dashboard/accounting/accounts',
       });
     }
 
-    res.json({ success: true, data: result });
+    const order = { danger: 0, warning: 1, info: 2 };
+    alerts.sort((a, b) => order[a.severity] - order[b.severity]);
+    res.json({ success: true, data: alerts });
   } catch (err) { next(err); }
 });
 

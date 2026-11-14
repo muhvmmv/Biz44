@@ -1,8 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
-import { PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient();
+import { prisma } from '../../lib/prisma';
 const router = Router();
 
 router.use(authenticate);
@@ -129,7 +128,7 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
     }
 
     // Guard 2: cannot delete if any records reference this location
-    const [invoices, payments, transactions, movements, purchases, batches, attendance, leaves, payrolls] =
+    const [invoices, payments, transactions, movements, purchases, batches, attendance, leaves, payrolls, journal] =
       await Promise.all([
         prisma.invoice.count({ where: { locationId: location.id } }),
         prisma.payment.count({ where: { locationId: location.id } }),
@@ -140,11 +139,12 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
         prisma.attendance.count({ where: { locationId: location.id } }),
         prisma.leave.count({ where: { locationId: location.id } }),
         prisma.payroll.count({ where: { locationId: location.id } }),
+        prisma.journalEntry.count({ where: { locationId: location.id } }),
       ]);
 
     const totalRefs =
       invoices + payments + transactions + movements + purchases +
-      batches + attendance + leaves + payrolls;
+      batches + attendance + leaves + payrolls + journal;
 
     if (totalRefs > 0) {
       return res.status(400).json({

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import PaymentAccountSelect from "@/components/ui/PaymentAccountSelect";
 import { apiFetch } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import PageHeader from "@/components/ui/PageHeader";
@@ -40,6 +41,7 @@ export default function ReceiveInventoryPage() {
     "paid" | "unpaid" | "partially_paid"
   >("paid");
   const [partialAmount, setPartialAmount] = useState(0);
+  const [paymentAccountId, setPaymentAccountId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState("");
@@ -105,6 +107,7 @@ export default function ReceiveInventoryPage() {
           supplierId: supplierId || undefined,
           paymentStatus,
           amountPaid: paymentStatus === "partially_paid" ? partialAmount : undefined,
+          paymentAccountId: paymentStatus === "unpaid" ? undefined : paymentAccountId,
         }),
       });
       setSuccess(true);
@@ -142,11 +145,11 @@ export default function ReceiveInventoryPage() {
           </CardHeader>
           <CardContent className="grid sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-1 text-navy">Supplier</label>
+              <label className="block text-sm font-medium mb-1 text-charcoal">Supplier</label>
               <select
                 value={supplierId}
                 onChange={(e) => setSupplierId(e.target.value)}
-                className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
               >
                 <option value="">— Select supplier (optional) —</option>
                 {suppliers.map((s) => (
@@ -157,14 +160,14 @@ export default function ReceiveInventoryPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1 text-navy">
+              <label className="block text-sm font-medium mb-1 text-charcoal">
                 Reference / Receipt number
               </label>
               <input
                 value={reference}
                 onChange={(e) => setReference(e.target.value)}
                 placeholder="e.g. PO-2043"
-                className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
               />
             </div>
           </CardContent>
@@ -199,7 +202,7 @@ export default function ReceiveInventoryPage() {
                         <select
                           value={item.productId}
                           onChange={(e) => handleProductSelect(index, e.target.value)}
-                          className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                          className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
                         >
                           <option value="">Select product</option>
                           {products.map((p) => (
@@ -268,7 +271,7 @@ export default function ReceiveInventoryPage() {
           <CardContent className="space-y-4">
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">
+                <label className="block text-sm font-medium mb-1 text-charcoal">
                   Payment status
                 </label>
                 <select
@@ -278,7 +281,7 @@ export default function ReceiveInventoryPage() {
                       e.target.value as "paid" | "unpaid" | "partially_paid"
                     )
                   }
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
                 >
                   <option value="paid">Paid in full</option>
                   <option value="unpaid">Unpaid (on credit)</option>
@@ -287,7 +290,7 @@ export default function ReceiveInventoryPage() {
               </div>
               {paymentStatus === "partially_paid" && (
                 <div>
-                  <label className="block text-sm font-medium mb-1 text-navy">
+                  <label className="block text-sm font-medium mb-1 text-charcoal">
                     Amount paid
                   </label>
                   <NumericInput
@@ -296,6 +299,14 @@ export default function ReceiveInventoryPage() {
                     value={partialAmount}
                     onChange={setPartialAmount}
                   />
+                </div>
+              )}
+              {paymentStatus !== "unpaid" && (
+                <div>
+                  <label className="block text-sm font-medium mb-1 text-charcoal">
+                    Paid from
+                  </label>
+                  <PaymentAccountSelect value={paymentAccountId} onChange={setPaymentAccountId} />
                 </div>
               )}
             </div>
@@ -333,7 +344,7 @@ export default function ReceiveInventoryPage() {
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Optional notes..."
-              className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+              className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
             />
           </CardContent>
         </Card>

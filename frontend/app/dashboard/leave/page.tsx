@@ -145,43 +145,43 @@ export default function LeavePage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-border-soft">
             <div className="p-6 border-b border-border-soft">
-              <h2 className="text-lg font-bold text-navy">New Leave Request</h2>
+              <h2 className="text-lg font-bold text-charcoal">New Leave Request</h2>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Employee</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Employee</label>
                 <select required value={form.employeeId}
                   onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale">
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand">
                   <option value="">Select employee</option>
                   {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.firstName} {emp.lastName}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Leave type</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Leave type</label>
                 <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale">
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand">
                   {leaveTypes.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1 text-navy">From</label>
+                  <label className="block text-sm font-medium mb-1 text-charcoal">From</label>
                   <input type="date" required value={form.startDate}
                     onChange={(e) => setForm({ ...form, startDate: e.target.value })}
-                    className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" />
+                    className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1 text-navy">To</label>
+                  <label className="block text-sm font-medium mb-1 text-charcoal">To</label>
                   <input type="date" required value={form.endDate}
                     onChange={(e) => setForm({ ...form, endDate: e.target.value })}
-                    className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" />
+                    className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">Reason</label>
+                <label className="block text-sm font-medium mb-1 text-charcoal">Reason</label>
                 <input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" />
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>

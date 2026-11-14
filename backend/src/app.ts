@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import authRoutes from './modules/auth/auth.routes';
 import { errorHandler } from './middleware/errorHandler';
+import { env } from './config/env';
 import customerRoutes from './modules/customers/customers.routes';
 import supplierRoutes from './modules/suppliers/suppliers.routes';
 import employeeRoutes from './modules/employees/employee.routes';
@@ -26,7 +27,7 @@ const app = express();
 
 // Middleware
 app.use(helmet());
-app.use(cors({ origin: 'http://localhost:3000', credentials: true })); // Adjust to frontend URL
+app.use(cors({ origin: env.CORS_ORIGINS, credentials: true }));
 app.use(morgan('dev'));
 app.use(express.json());
 
@@ -52,10 +53,16 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Error handler
-app.use(errorHandler)
-
 app.use('/api/customers', customerRoutes);
 app.use('/api/suppliers', supplierRoutes);
 app.use('/api/employees', employeeRoutes);
+
+// Unknown API routes
+app.use('/api', (req, res) => {
+  res.status(404).json({ success: false, message: `Route not found: ${req.method} ${req.originalUrl}` });
+});
+
+// Error handler — must be registered after every route
+app.use(errorHandler);
+
 export default app;

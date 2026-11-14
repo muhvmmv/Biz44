@@ -88,8 +88,8 @@ export default function SettingsPage() {
             onClick={() => setTab(t.key)}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition ${
               tab === t.key
-                ? "border-rose-vale text-rose-vale"
-                : "border-transparent text-ink-soft hover:text-navy"
+                ? "border-brand text-brand-dark"
+                : "border-transparent text-ink-soft hover:text-charcoal"
             }`}
           >
             {t.label}
@@ -104,25 +104,25 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-1 text-navy">
+              <label className="block text-sm font-medium mb-1 text-charcoal">
                 Business name
               </label>
               <input
                 value={company.name}
                 onChange={(e) => setCompany({ ...company, name: e.target.value })}
-                className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale focus:border-rose-vale"
+                className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand"
               />
             </div>
 
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">
+                <label className="block text-sm font-medium mb-1 text-charcoal">
                   Business type
                 </label>
                 <select
                   value={company.businessType || "other"}
                   onChange={(e) => setCompany({ ...company, businessType: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
                 >
                   <option value="retail">Retail</option>
                   <option value="services">Services</option>
@@ -135,50 +135,50 @@ export default function SettingsPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">
+                <label className="block text-sm font-medium mb-1 text-charcoal">
                   Industry
                 </label>
                 <input
                   value={company.industry || ""}
                   onChange={(e) => setCompany({ ...company, industry: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
                 />
               </div>
             </div>
 
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">
+                <label className="block text-sm font-medium mb-1 text-charcoal">
                   Email
                 </label>
                 <input
                   type="email"
                   value={company.email || ""}
                   onChange={(e) => setCompany({ ...company, email: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">
+                <label className="block text-sm font-medium mb-1 text-charcoal">
                   Phone
                 </label>
                 <input
                   value={company.phone || ""}
                   onChange={(e) => setCompany({ ...company, phone: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-1 text-navy">
+              <label className="block text-sm font-medium mb-1 text-charcoal">
                 Address
               </label>
               <textarea
                 rows={3}
                 value={company.address || ""}
                 onChange={(e) => setCompany({ ...company, address: e.target.value })}
-                className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
               />
             </div>
 
@@ -200,23 +200,23 @@ export default function SettingsPage() {
           <CardContent className="space-y-4">
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">
+                <label className="block text-sm font-medium mb-1 text-charcoal">
                   Country
                 </label>
                 <input
                   value={company.country || ""}
                   onChange={(e) => setCompany({ ...company, country: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1 text-navy">
+                <label className="block text-sm font-medium mb-1 text-charcoal">
                   Currency
                 </label>
                 <select
                   value={company.currency || "USD"}
                   onChange={(e) => setCompany({ ...company, currency: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
                 >
                   {CURRENCY_CODES.map((c) => (
                     <option key={c} value={c}>
