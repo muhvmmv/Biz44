@@ -1,18 +1,21 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { resolveLocation, locationWhere } from '../../middleware/locationAuth';
-import { PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient();
+import { prisma } from '../../lib/prisma';
+import { badRequest } from '../../lib/errors';
+import {
+  findOrCreateAccount as findOrCreateSystemAccount,
+  listPaymentAccounts,
+  parsePositiveAmount,
+  resolvePaymentAccount,
+} from '../../lib/accounts';
 const router = Router();
 
 router.use(authenticate);
 
-async function findOrCreateAccount(companyId: string, name: string, type: string) {
-  const existing = await prisma.account.findFirst({ where: { companyId, name } });
-  if (existing) return existing;
-  return prisma.account.create({ data: { companyId, name, type, balance: 0 } });
-}
+const findOrCreateAccount = (companyId: string, name: string, type: string) =>
+  findOrCreateSystemAccount(prisma, companyId, name, type);
 
 function targetLocationId(req: Request): string {
   return req.locationId || req.allowedLocationIds[0];
@@ -45,6 +48,18 @@ router.get('/accounts', async (req: Request, res: Response, next: NextFunction) 
       orderBy: [{ type: 'asc' }, { name: 'asc' }],
     });
     res.json({ success: true, data: accounts });
+  } catch (err) { next(err); }
+});
+
+// ---------- PAYMENT ACCOUNTS (cash + bank) ----------
+// The accounts money can be paid from or received into.
+router.get('/payment-accounts', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const accounts = await listPaymentAccounts(prisma, req.user!.companyId);
+    res.json({
+      success: true,
+      data: accounts.map((a: any) => ({ id: a.id, name: a.name, balance: a.balance })),
+    });
   } catch (err) { next(err); }
 });
 
@@ -85,14 +100,22 @@ router.get('/expenses', resolveLocation, async (req: Request, res: Response, nex
 router.post('/expenses', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const companyId = req.user?.companyId!;
-    const { category, amount, description, date } = req.body;
+    const { category, description, date } = req.body;
+    const amount = parsePositiveAmount(req.body?.amount);
 
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ success: false, message: 'Invalid amount' });
+    const categoryName =
+      typeof category === 'string' && category.trim() ? category.trim().slice(0, 80) : 'General Expense';
+    // A category may be new, but it must never resolve to a non-expense
+    // account (e.g. a category named "Cash" would otherwise post to Cash).
+    const existingCategory = await prisma.account.findFirst({ where: { companyId, name: categoryName } });
+    if (existingCategory && existingCategory.type !== 'expense') {
+      throw badRequest(`"${categoryName}" is not an expense category`);
     }
-
-    const account = await findOrCreateAccount(companyId, category || 'General Expense', 'expense');
-    const cash = await findOrCreateAccount(companyId, 'Cash', 'asset');
+    const account = existingCategory || (await findOrCreateAccount(companyId, categoryName, 'expense'));
+    const cash = await resolvePaymentAccount(prisma, companyId, {
+      accountId: req.body?.accountId,
+      account: req.body?.account,
+    });
     const locationId = targetLocationId(req);
 
     const result = await prisma.$transaction(async (tx) => {
@@ -103,18 +126,18 @@ router.post('/expenses', resolveLocation, async (req: Request, res: Response, ne
           accountId: account.id,
           type: 'expense',
           description: description || category,
-          amount: Number(amount),
+          amount,
           date: date ? new Date(date) : new Date(),
         },
       });
 
       await tx.account.update({
         where: { id: account.id },
-        data: { balance: { increment: Number(amount) } },
+        data: { balance: { increment: amount } },
       });
       await tx.account.update({
         where: { id: cash.id },
-        data: { balance: { decrement: Number(amount) } },
+        data: { balance: { decrement: amount } },
       });
 
       return expense;

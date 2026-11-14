@@ -1,8 +1,16 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/auth';
-import { PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient();
+import { prisma } from '../../lib/prisma';
+import { badRequest, notFound } from '../../lib/errors';
+
+const ATTENDANCE_STATUSES = ['present', 'absent', 'late', 'leave'];
+
+async function assertEmployee(companyId: string, employeeId: unknown) {
+  if (typeof employeeId !== 'string' || !employeeId) throw badRequest('Employee is required');
+  const emp = await prisma.employee.findFirst({ where: { id: employeeId, companyId }, select: { id: true } });
+  if (!emp) throw notFound('Employee not found');
+}
 const router = Router();
 
 router.use(authenticate);
@@ -38,6 +46,8 @@ router.post('/', async (req, res, next) => {
     if (!employeeId || !date || !status) {
       return res.status(400).json({ success: false, message: 'Missing fields' });
     }
+    if (!ATTENDANCE_STATUSES.includes(status)) throw badRequest('Invalid attendance status');
+    await assertEmployee(companyId, employeeId);
 
     const record = await prisma.attendance.create({
       data: {
@@ -55,9 +65,19 @@ router.post('/', async (req, res, next) => {
 // UPDATE attendance
 router.put('/:id', async (req, res, next) => {
   try {
+    const companyId = req.user!.companyId;
+    const existing = await prisma.attendance.findFirst({ where: { id: req.params.id, companyId } });
+    if (!existing) throw notFound();
+
+    const { date, status, notes } = req.body;
+    if (status !== undefined && !ATTENDANCE_STATUSES.includes(status)) throw badRequest('Invalid attendance status');
     const record = await prisma.attendance.update({
-      where: { id: req.params.id },
-      data: req.body,
+      where: { id: existing.id },
+      data: {
+        ...(date !== undefined && { date: new Date(date) }),
+        ...(status !== undefined && { status }),
+        ...(notes !== undefined && { notes }),
+      },
     });
     res.json({ success: true, data: record });
   } catch (err) { next(err); }
@@ -66,7 +86,10 @@ router.put('/:id', async (req, res, next) => {
 // DELETE
 router.delete('/:id', async (req, res, next) => {
   try {
-    await prisma.attendance.delete({ where: { id: req.params.id } });
+    const { count } = await prisma.attendance.deleteMany({
+      where: { id: req.params.id, companyId: req.user!.companyId },
+    });
+    if (count === 0) throw notFound();
     res.json({ success: true });
   } catch (err) { next(err); }
 });

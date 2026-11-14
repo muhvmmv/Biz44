@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/auth';
-import { PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient();
+import { prisma } from '../../lib/prisma';
+import { notFound } from '../../lib/errors';
 const router = Router();
 
 router.use(authenticate);
@@ -49,8 +49,12 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const { title, content, category, date } = req.body;
+    const existing = await prisma.reportNote.findFirst({
+      where: { id: req.params.id, companyId: req.user!.companyId },
+    });
+    if (!existing) throw notFound();
     const note = await prisma.reportNote.update({
-      where: { id: req.params.id },
+      where: { id: existing.id },
       data: {
         title,
         content,
@@ -65,7 +69,10 @@ router.put('/:id', async (req, res, next) => {
 // DELETE note
 router.delete('/:id', async (req, res, next) => {
   try {
-    await prisma.reportNote.delete({ where: { id: req.params.id } });
+    const { count } = await prisma.reportNote.deleteMany({
+      where: { id: req.params.id, companyId: req.user!.companyId },
+    });
+    if (count === 0) throw notFound();
     res.json({ success: true });
   } catch (err) { next(err); }
 });

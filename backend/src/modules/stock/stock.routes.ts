@@ -1,17 +1,25 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { resolveLocation, locationWhere } from '../../middleware/locationAuth';
-import { PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient();
+import { prisma } from '../../lib/prisma';
+import { badRequest, notFound } from '../../lib/errors';
+import {
+  findOrCreateAccount, resolvePaymentAccount, parsePositiveAmount, parsePositiveQuantity,
+} from '../../lib/accounts';
+
 const router = Router();
 
 router.use(authenticate);
 
-async function findOrCreateAccount(tx: any, companyId: string, name: string, type: string) {
-  const existing = await tx.account.findFirst({ where: { companyId, name } });
-  if (existing) return existing;
-  return tx.account.create({ data: { companyId, name, type, balance: 0 } });
+const RECEIVE_PAYMENT_STATUSES = ['paid', 'unpaid', 'partially_paid'];
+
+/** Load a product only if it belongs to this company. */
+async function findCompanyProduct(tx: any, companyId: string, productId: unknown) {
+  if (typeof productId !== 'string' || !productId) throw badRequest('Product is required');
+  const product = await tx.product.findFirst({ where: { id: productId, companyId } });
+  if (!product) throw notFound('Product not found');
+  return product;
 }
 
 function targetLocationId(req: Request): string {
@@ -54,10 +62,11 @@ router.post('/receive', resolveLocation, async (req: Request, res: Response, nex
     const companyId = req.user!.companyId;
     const locationId = targetLocationId(req);
     const {
-      items, supplierId, reference, notes,
-      paymentStatus = 'paid', amountPaid, paymentAccount = 'Cash',
+      items: rawItems, supplierId, reference, notes,
+      paymentStatus: requestedStatus = 'paid', amountPaid, paymentAccount, paymentAccountId,
     } = req.body as {
       items: { productId: string; quantity: number; unitCost: number; sellingPrice?: number }[];
+      paymentAccountId?: string;
       supplierId?: string;
       reference?: string;
       notes?: string;
@@ -66,16 +75,59 @@ router.post('/receive', resolveLocation, async (req: Request, res: Response, nex
       paymentAccount?: string;
     };
 
-    if (!items || items.length === 0) {
+    if (!Array.isArray(rawItems) || rawItems.length === 0) {
       return res.status(400).json({ success: false, message: 'At least one item required' });
+    }
+    if (!RECEIVE_PAYMENT_STATUSES.includes(requestedStatus)) {
+      throw badRequest('Payment status must be paid, unpaid or partially_paid');
+    }
+
+    const items = rawItems.map((it, i) => {
+      const unitCost = Number(it?.unitCost);
+      if (!Number.isFinite(unitCost) || unitCost < 0) {
+        throw badRequest(`Line ${i + 1}: unit cost must be 0 or more`);
+      }
+      let sellingPrice: number | undefined;
+      if (it?.sellingPrice !== undefined && it?.sellingPrice !== null) {
+        sellingPrice = Number(it.sellingPrice);
+        if (!Number.isFinite(sellingPrice) || sellingPrice < 0) {
+          throw badRequest(`Line ${i + 1}: selling price must be 0 or more`);
+        }
+      }
+      return {
+        productId: String(it?.productId || ''),
+        quantity: parsePositiveQuantity(it?.quantity, `Line ${i + 1} quantity`),
+        unitCost,
+        sellingPrice,
+      };
+    });
+
+    // Every product and the supplier must belong to this company.
+    const productIds = Array.from(new Set(items.map((it) => it.productId)));
+    const ownedCount = await prisma.product.count({ where: { id: { in: productIds }, companyId } });
+    if (ownedCount !== productIds.length) throw notFound('One or more products were not found');
+    if (supplierId) {
+      const supplier = await prisma.supplier.findFirst({ where: { id: supplierId, companyId }, select: { id: true } });
+      if (!supplier) throw notFound('Supplier not found');
     }
 
     const totalCost = items.reduce((s, it) => s + it.quantity * it.unitCost, 0);
-    const paidAmount =
-      paymentStatus === 'paid' ? totalCost :
-      paymentStatus === 'unpaid' ? 0 :
-      Math.min(Number(amountPaid ?? 0), totalCost);
+    let paidAmount = 0;
+    if (requestedStatus === 'paid') paidAmount = totalCost;
+    else if (requestedStatus === 'partially_paid') {
+      paidAmount = parsePositiveAmount(amountPaid, 'Amount paid');
+      if (paidAmount > totalCost + 0.01) throw badRequest('Amount paid cannot be more than the purchase total');
+      paidAmount = Math.min(paidAmount, totalCost);
+    }
     const outstanding = totalCost - paidAmount;
+    // Derive the stored status from the amounts so it is always consistent.
+    const paymentStatus =
+      outstanding <= 0.01 ? 'paid' : paidAmount > 0 ? 'partially_paid' : 'unpaid';
+
+    // Validate the payment account before writing anything.
+    const payFromAccount = paidAmount > 0
+      ? await resolvePaymentAccount(prisma, companyId, { accountId: paymentAccountId, account: paymentAccount })
+      : null;
 
     const result = await prisma.$transaction(async (tx) => {
       const purchase = await tx.purchase.create({
@@ -101,8 +153,7 @@ router.post('/receive', resolveLocation, async (req: Request, res: Response, nex
       });
 
       for (const item of items) {
-        const product = await tx.product.findUnique({ where: { id: item.productId } });
-        if (!product) throw new Error(`Product not found: ${item.productId}`);
+        const product = await findCompanyProduct(tx, companyId, item.productId);
 
         const batch = await tx.inventoryBatch.create({
           data: {
@@ -168,8 +219,8 @@ router.post('/receive', resolveLocation, async (req: Request, res: Response, nex
         },
       });
 
-      if (paidAmount > 0) {
-        const cashAccount = await findOrCreateAccount(tx, companyId, paymentAccount, 'asset');
+      if (paidAmount > 0 && payFromAccount) {
+        const cashAccount = payFromAccount;
         await tx.account.update({
           where: { id: cashAccount.id },
           data: { balance: { decrement: paidAmount } },
@@ -218,21 +269,16 @@ router.post('/damage', resolveLocation, async (req: Request, res: Response, next
   try {
     const companyId = req.user!.companyId;
     const locationId = targetLocationId(req);
-    const { productId, quantity, reason, notes } = req.body as {
+    const { productId, reason, notes } = req.body as {
       productId: string;
-      quantity: number;
       reason?: string;
       notes?: string;
     };
-
-    if (!productId || quantity <= 0) {
-      return res.status(400).json({ success: false, message: 'Invalid input' });
-    }
+    const quantity = parsePositiveQuantity(req.body?.quantity);
 
     await prisma.$transaction(async (tx) => {
-      const product = await tx.product.findUnique({ where: { id: productId } });
-      if (!product) throw new Error('Product not found');
-      if (product.quantity < quantity) throw new Error('Insufficient stock');
+      const product = await findCompanyProduct(tx, companyId, productId);
+      if (product.quantity < quantity) throw badRequest('Insufficient stock');
 
       const batches = await tx.inventoryBatch.findMany({
         where: { productId, locationId, quantityRemaining: { gt: 0 } },
@@ -273,6 +319,12 @@ router.post('/damage', resolveLocation, async (req: Request, res: Response, next
         });
 
         remaining -= consume;
+      }
+
+      if (remaining > 0) {
+        throw badRequest(
+          `Only ${quantity - remaining} of ${product.name} is in stock at this location; cannot write off ${quantity}`
+        );
       }
 
       const newQuantity = product.quantity - quantity;
@@ -321,36 +373,33 @@ router.post('/supplier-return', resolveLocation, async (req: Request, res: Respo
   try {
     const companyId = req.user!.companyId;
     const locationId = targetLocationId(req);
-    const { productId, quantity, batchId, reference, notes } = req.body as {
+    const { productId, batchId, reference, notes } = req.body as {
       productId: string;
-      quantity: number;
       batchId?: string;
       reference?: string;
       notes?: string;
     };
-
-    if (!productId || quantity <= 0) {
-      return res.status(400).json({ success: false, message: 'Invalid input' });
-    }
+    const quantity = parsePositiveQuantity(req.body?.quantity);
 
     await prisma.$transaction(async (tx) => {
-      const product = await tx.product.findUnique({ where: { id: productId } });
-      if (!product) throw new Error('Product not found');
-      if (product.quantity < quantity) throw new Error('Insufficient stock');
+      const product = await findCompanyProduct(tx, companyId, productId);
+      if (product.quantity < quantity) throw badRequest('Insufficient stock');
 
       let batch;
       if (batchId) {
-        batch = await tx.inventoryBatch.findFirst({ where: { id: batchId, locationId } });
-      }
-      if (!batch) {
+        batch = await tx.inventoryBatch.findFirst({
+          where: { id: batchId, companyId, productId: product.id, locationId },
+        });
+        if (!batch) throw badRequest('That batch does not belong to this product at this location');
+      } else {
         const candidates = await tx.inventoryBatch.findMany({
-          where: { productId, locationId, quantityRemaining: { gt: 0 } },
+          where: { companyId, productId: product.id, locationId, quantityRemaining: { gt: 0 } },
           orderBy: { receivedAt: 'desc' },
         });
         batch = candidates[0];
       }
       if (!batch || batch.quantityRemaining < quantity) {
-        throw new Error('Not enough stock in a single batch to return');
+        throw badRequest('Not enough stock in a single batch to return');
       }
 
       await tx.inventoryBatch.update({
@@ -422,10 +471,13 @@ router.post('/adjust', resolveLocation, async (req: Request, res: Response, next
   try {
     const companyId = req.user!.companyId;
     const locationId = targetLocationId(req);
-    const { productId, quantity, notes } = req.body;
+    const { productId, notes } = req.body;
+    const quantity = Number(req.body?.quantity);
+    if (!Number.isInteger(quantity) || quantity === 0) {
+      throw badRequest('Adjustment quantity must be a whole number other than 0');
+    }
 
-    const product = await prisma.product.findUnique({ where: { id: productId } });
-    if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+    const product = await findCompanyProduct(prisma, companyId, productId);
 
     const newBalance = product.quantity + quantity;
     if (newBalance < 0) return res.status(400).json({ success: false, message: 'Insufficient stock' });
@@ -444,8 +496,7 @@ router.post('/adjust', resolveLocation, async (req: Request, res: Response, next
             quantityReceived: quantity,
             quantityRemaining: quantity,
             unitCost: avgCost,
-            reference: 'Adjustment',
-            notes,
+            reference: notes ? `Adjustment: ${String(notes).slice(0, 120)}` : 'Adjustment',
           },
         });
         batchId = batch.id;
@@ -463,6 +514,11 @@ router.post('/adjust', resolveLocation, async (req: Request, res: Response, next
             data: { quantityRemaining: b.quantityRemaining - consume },
           });
           remaining -= consume;
+        }
+        if (remaining > 0) {
+          throw badRequest(
+            `Only ${Math.abs(quantity) - remaining} of ${product.name} is in stock at this location`
+          );
         }
       }
 

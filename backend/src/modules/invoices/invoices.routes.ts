@@ -1,12 +1,24 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
-import { resolveLocation, locationWhere } from '../../middleware/locationAuth';
-import { PrismaClient } from '@prisma/client';
+import { resolveLocation, locationWhere, guardRecordLocation } from '../../middleware/locationAuth';
 
-const prisma = new PrismaClient();
+import { prisma } from '../../lib/prisma';
+import { badRequest, notFound } from '../../lib/errors';
+import {
+  findOrCreateAccount, resolvePaymentAccount, parsePositiveAmount, parsePositiveQuantity,
+} from '../../lib/accounts';
 const router = Router();
 
 router.use(authenticate);
+
+// Every /:id route: the invoice must belong to this company and to a
+// location the user can access.
+router.param(
+  'id',
+  guardRecordLocation((id, companyId) =>
+    prisma.invoice.findFirst({ where: { id, companyId }, select: { locationId: true } })
+  )
+);
 
 async function nextInvoiceNumber(companyId: string) {
   // Find the highest existing invoice number (safe against deletes)
@@ -36,10 +48,49 @@ async function nextInvoiceNumber(companyId: string) {
   return `INV-${Date.now()}`;
 }
 
-async function findOrCreateAccount(tx: any, companyId: string, name: string, type: string) {
-  const existing = await tx.account.findFirst({ where: { companyId, name } });
-  if (existing) return existing;
-  return tx.account.create({ data: { companyId, name, type, balance: 0 } });
+const PAYABLE_STATUSES = ['unpaid', 'partially_paid', 'overdue'];
+
+interface CleanItem {
+  productId: string | null;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+/**
+ * Validate invoice lines and make sure every product and the customer
+ * belong to this company. Returns cleaned lines.
+ */
+async function validateInvoiceInput(companyId: string, body: any): Promise<CleanItem[]> {
+  const { items, customerId, customerName } = body || {};
+  if (!Array.isArray(items) || items.length === 0) throw badRequest('At least one item required');
+  if (!customerId && !(typeof customerName === 'string' && customerName.trim())) {
+    throw badRequest('Customer is required');
+  }
+  if (customerId) {
+    const customer = await prisma.customer.findFirst({ where: { id: customerId, companyId }, select: { id: true } });
+    if (!customer) throw notFound('Customer not found');
+  }
+
+  const clean: CleanItem[] = items.map((it: any, i: number) => {
+    const unitPrice = Number(it?.unitPrice);
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) throw badRequest(`Line ${i + 1}: price must be 0 or more`);
+    const description = typeof it?.description === 'string' ? it.description.trim() : '';
+    if (!description) throw badRequest(`Line ${i + 1}: description is required`);
+    return {
+      productId: it?.productId ? String(it.productId) : null,
+      description,
+      quantity: parsePositiveQuantity(it?.quantity, `Line ${i + 1} quantity`),
+      unitPrice,
+    };
+  });
+
+  const productIds = Array.from(new Set(clean.map((c) => c.productId).filter(Boolean))) as string[];
+  if (productIds.length > 0) {
+    const owned = await prisma.product.count({ where: { id: { in: productIds }, companyId } });
+    if (owned !== productIds.length) throw notFound('One or more products were not found');
+  }
+  return clean;
 }
 
 function targetLocationId(req: Request): string {
@@ -80,18 +131,12 @@ router.post('/', resolveLocation, async (req: Request, res: Response, next: Next
     const companyId = req.user?.companyId!;
     const {
       customerId, customerName, customerAddress, customerEmail, customerPhone,
-      dueDate, notes, items,
+      dueDate, notes,
     } = req.body;
-
-    if (!items || items.length === 0) {
-      return res.status(400).json({ success: false, message: 'At least one item required' });
-    }
-    if (!customerId && !customerName) {
-      return res.status(400).json({ success: false, message: 'Customer is required' });
-    }
+    const items = await validateInvoiceInput(companyId, req.body);
 
     let subtotal = 0;
-    for (const it of items) subtotal += Number(it.quantity) * Number(it.unitPrice);
+    for (const it of items) subtotal += it.quantity * it.unitPrice;
     const total = subtotal;
 
     const invoiceNumber = await nextInvoiceNumber(companyId);
@@ -114,12 +159,12 @@ router.post('/', resolveLocation, async (req: Request, res: Response, next: Next
         notes,
         dueDate: dueDate ? new Date(dueDate) : null,
         items: {
-          create: items.map((it: any) => ({
-            productId: it.productId || null,
+          create: items.map((it) => ({
+            productId: it.productId,
             description: it.description,
-            quantity: Number(it.quantity),
-            unitPrice: Number(it.unitPrice),
-            total: Number(it.quantity) * Number(it.unitPrice),
+            quantity: it.quantity,
+            unitPrice: it.unitPrice,
+            total: it.quantity * it.unitPrice,
           })),
         },
       },
@@ -143,16 +188,17 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
 
     const {
       customerId, customerName, customerAddress, customerEmail, customerPhone,
-      dueDate, notes, items,
+      dueDate, notes,
     } = req.body;
+    const items = await validateInvoiceInput(existing.companyId, req.body);
 
     let subtotal = 0;
-    for (const it of items) subtotal += Number(it.quantity) * Number(it.unitPrice);
+    for (const it of items) subtotal += it.quantity * it.unitPrice;
     const total = subtotal;
 
-    await prisma.invoiceItem.deleteMany({ where: { invoiceId: existing.id } });
-
-    const updated = await prisma.invoice.update({
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.invoiceItem.deleteMany({ where: { invoiceId: existing.id } });
+      return tx.invoice.update({
       where: { id: existing.id },
       data: {
         customerId: customerId || null,
@@ -165,16 +211,17 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
         subtotal,
         total,
         items: {
-          create: items.map((it: any) => ({
-            productId: it.productId || null,
+          create: items.map((it) => ({
+            productId: it.productId,
             description: it.description,
-            quantity: Number(it.quantity),
-            unitPrice: Number(it.unitPrice),
-            total: Number(it.quantity) * Number(it.unitPrice),
+            quantity: it.quantity,
+            unitPrice: it.unitPrice,
+            total: it.quantity * it.unitPrice,
           })),
         },
       },
       include: { items: true },
+      });
     });
 
     res.json({ success: true, data: updated });
@@ -208,8 +255,8 @@ router.post('/:id/finalize', async (req: Request, res: Response, next: NextFunct
       for (const item of invoice.items) {
         if (!item.productId) continue;
 
-        const product = await tx.product.findUnique({ where: { id: item.productId } });
-        if (!product) continue;
+        const product = await tx.product.findFirst({ where: { id: item.productId, companyId } });
+        if (!product) throw notFound(`Product on line "${item.description}" no longer exists`);
 
         // ========== THE ONLY STOCK VALIDATION ==========
         // Blocks ONLY when there is genuinely not enough stock.
@@ -361,14 +408,33 @@ router.post('/:id/finalize', async (req: Request, res: Response, next: NextFunct
 router.post('/:id/payment', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const companyId = req.user?.companyId!;
-    const { amount, method = 'cash', reference, notes } = req.body;
+    const { method = 'cash', reference, notes } = req.body;
+    const amount = parsePositiveAmount(req.body?.amount);
 
     const invoice = await prisma.invoice.findFirst({
       where: { id: req.params.id, companyId },
     });
     if (!invoice) return res.status(404).json({ success: false, message: 'Not found' });
 
-    const newPaid = invoice.amountPaid + Number(amount);
+    if (!PAYABLE_STATUSES.includes(invoice.status)) {
+      const reason =
+        invoice.status === 'draft' ? 'Finalize the invoice before recording a payment' :
+        invoice.status === 'paid' ? 'This invoice is already fully paid' :
+        `Payments cannot be recorded on a ${invoice.status} invoice`;
+      throw badRequest(reason);
+    }
+    const balance = invoice.total - invoice.amountPaid;
+    if (amount > balance + 0.01) {
+      throw badRequest(`Amount is more than the balance due (${balance.toFixed(2)})`);
+    }
+
+    // Validate the receiving account before writing anything.
+    const receiveAccount = await resolvePaymentAccount(prisma, companyId, {
+      accountId: req.body?.accountId,
+      account: req.body?.account,
+    });
+
+    const newPaid = invoice.amountPaid + amount;
     let newStatus = invoice.status;
     if (newPaid >= invoice.total - 0.01) newStatus = 'paid';
     else if (newPaid > 0) newStatus = 'partially_paid';
@@ -379,7 +445,7 @@ router.post('/:id/payment', async (req: Request, res: Response, next: NextFuncti
           companyId,
           locationId: invoice.locationId,
           invoiceId: invoice.id,
-          amount: Number(amount),
+          amount,
           method,
           reference,
           notes,
@@ -391,7 +457,7 @@ router.post('/:id/payment', async (req: Request, res: Response, next: NextFuncti
         data: { amountPaid: newPaid, status: newStatus },
       });
 
-      const cashAccount = await findOrCreateAccount(tx, companyId, 'Cash', 'asset');
+      const cashAccount = receiveAccount;
       const arAccount = await findOrCreateAccount(tx, companyId, 'Accounts Receivable', 'asset');
 
       await tx.transaction.create({
@@ -401,17 +467,17 @@ router.post('/:id/payment', async (req: Request, res: Response, next: NextFuncti
           accountId: cashAccount.id,
           type: 'payment',
           description: `Payment for ${invoice.invoiceNumber}`,
-          amount: Number(amount),
+          amount,
           date: new Date(),
         },
       });
       await tx.account.update({
         where: { id: cashAccount.id },
-        data: { balance: { increment: Number(amount) } },
+        data: { balance: { increment: amount } },
       });
       await tx.account.update({
         where: { id: arAccount.id },
-        data: { balance: { decrement: Number(amount) } },
+        data: { balance: { decrement: amount } },
       });
     });
 
@@ -443,7 +509,7 @@ router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunctio
           totalCogsReversed += m.totalCost;
 
           if (m.batchId) {
-            const batch = await tx.inventoryBatch.findUnique({ where: { id: m.batchId } });
+            const batch = await tx.inventoryBatch.findFirst({ where: { id: m.batchId, companyId } });
             if (batch) {
               await tx.inventoryBatch.update({
                 where: { id: batch.id },
@@ -452,7 +518,7 @@ router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunctio
             }
           }
 
-          const product = await tx.product.findUnique({ where: { id: m.productId } });
+          const product = await tx.product.findFirst({ where: { id: m.productId, companyId } });
           if (product) {
             await tx.product.update({
               where: { id: product.id },

@@ -1,9 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
-import { CrudService } from '../../services/crud.service';
-import { PrismaClient } from '@prisma/client';
+import { CrudService, pick } from '../../services/crud.service';
+import { badRequest } from '../../lib/errors';
 
-const prisma = new PrismaClient();
+import { prisma } from '../../lib/prisma';
 const router = Router();
 const employeeService = new CrudService('employee');
 
@@ -46,38 +46,51 @@ router.get('/:id/summary', async (req: Request, res: Response, next: NextFunctio
   } catch (err) { next(err); }
 });
 
+const WRITABLE = ['firstName', 'lastName', 'email', 'phone', 'position', 'salary', 'hireDate'] as const;
+
+function normalizeEmployee(data: Record<string, any>) {
+  if (data.salary !== undefined) {
+    const salary = Number(data.salary);
+    if (!Number.isFinite(salary) || salary < 0) throw badRequest('Salary must be a non-negative number');
+    data.salary = salary;
+  }
+  if (data.hireDate !== undefined) data.hireDate = data.hireDate ? new Date(data.hireDate) : null;
+  return data;
+}
+
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const employees = await employeeService.findMany({ companyId: req.user?.companyId });
-    res.json({ success: true, data: employees });
+    const rows = await employeeService.findMany(req.user!.companyId, { orderBy: { createdAt: 'desc' } });
+    res.json({ success: true, data: rows });
   } catch (err) { next(err); }
 });
 
 router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const companyId = req.user?.companyId;
-    const employee = await employeeService.create({ ...req.body, companyId });
-    res.status(201).json({ success: true, data: employee });
+    const data = normalizeEmployee(pick(req.body, WRITABLE));
+    if (!data.firstName || !data.lastName) throw badRequest('firstName and lastName required');
+    const row = await employeeService.create(req.user!.companyId, data);
+    res.status(201).json({ success: true, data: row });
   } catch (err) { next(err); }
 });
 
 router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const employee = await employeeService.findById(req.params.id);
-    res.json({ success: true, data: employee });
+    const row = await employeeService.findOne(req.params.id, req.user!.companyId);
+    res.json({ success: true, data: row });
   } catch (err) { next(err); }
 });
 
 router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const employee = await employeeService.update(req.params.id, req.body);
-    res.json({ success: true, data: employee });
+    const row = await employeeService.update(req.params.id, req.user!.companyId, normalizeEmployee(pick(req.body, WRITABLE)));
+    res.json({ success: true, data: row });
   } catch (err) { next(err); }
 });
 
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    await employeeService.delete(req.params.id);
+    await employeeService.delete(req.params.id, req.user!.companyId);
     res.json({ success: true });
   } catch (err) { next(err); }
 });

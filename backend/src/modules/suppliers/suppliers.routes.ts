@@ -1,9 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
-import { CrudService } from '../../services/crud.service';
-import { PrismaClient } from '@prisma/client';
+import { CrudService, pick } from '../../services/crud.service';
+import { badRequest } from '../../lib/errors';
 
-const prisma = new PrismaClient();
+import { prisma } from '../../lib/prisma';
 const router = Router();
 const supplierService = new CrudService('supplier');
 
@@ -60,38 +60,41 @@ router.get('/:id/summary', async (req: Request, res: Response, next: NextFunctio
   } catch (err) { next(err); }
 });
 
+const WRITABLE = ['name', 'email', 'phone', 'address'] as const;
+
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const suppliers = await supplierService.findMany({ companyId: req.user?.companyId });
-    res.json({ success: true, data: suppliers });
+    const rows = await supplierService.findMany(req.user!.companyId, { orderBy: { name: 'asc' } });
+    res.json({ success: true, data: rows });
   } catch (err) { next(err); }
 });
 
 router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const companyId = req.user?.companyId;
-    const supplier = await supplierService.create({ ...req.body, companyId });
-    res.status(201).json({ success: true, data: supplier });
+    const data = pick(req.body, WRITABLE);
+    if (!data.name) throw badRequest('name required');
+    const row = await supplierService.create(req.user!.companyId, data);
+    res.status(201).json({ success: true, data: row });
   } catch (err) { next(err); }
 });
 
 router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const supplier = await supplierService.findById(req.params.id);
-    res.json({ success: true, data: supplier });
+    const row = await supplierService.findOne(req.params.id, req.user!.companyId);
+    res.json({ success: true, data: row });
   } catch (err) { next(err); }
 });
 
 router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const supplier = await supplierService.update(req.params.id, req.body);
-    res.json({ success: true, data: supplier });
+    const row = await supplierService.update(req.params.id, req.user!.companyId, pick(req.body, WRITABLE));
+    res.json({ success: true, data: row });
   } catch (err) { next(err); }
 });
 
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    await supplierService.delete(req.params.id);
+    await supplierService.delete(req.params.id, req.user!.companyId);
     res.json({ success: true });
   } catch (err) { next(err); }
 });

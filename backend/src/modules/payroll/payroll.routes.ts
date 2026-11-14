@@ -1,8 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/auth';
-import { PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient();
+import { prisma } from '../../lib/prisma';
 const router = Router();
 
 router.use(authenticate);
@@ -69,7 +68,7 @@ router.post('/run', async (req, res, next) => {
 router.post('/:id/pay', async (req, res, next) => {
   try {
     const companyId = req.user?.companyId!;
-    const payroll = await prisma.payroll.findUnique({ where: { id: req.params.id } });
+    const payroll = await prisma.payroll.findFirst({ where: { id: req.params.id, companyId: req.user!.companyId } });
     if (!payroll) return res.status(404).json({ success: false, message: 'Not found' });
     if (payroll.status === 'paid') {
       return res.status(400).json({ success: false, message: 'Already paid' });
@@ -121,7 +120,7 @@ router.post('/:id/pay', async (req, res, next) => {
 // DELETE payroll
 router.delete('/:id', async (req, res, next) => {
   try {
-    const payroll = await prisma.payroll.findUnique({ where: { id: req.params.id } });
+    const payroll = await prisma.payroll.findFirst({ where: { id: req.params.id, companyId: req.user!.companyId } });
     if (!payroll) return res.status(404).json({ success: false, message: 'Not found' });
     if (payroll.status === 'paid') {
       return res.status(400).json({ success: false, message: 'Cannot delete paid payroll' });

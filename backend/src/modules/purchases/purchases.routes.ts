@@ -1,23 +1,22 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
-import { resolveLocation, locationWhere } from '../../middleware/locationAuth';
-import { PrismaClient } from '@prisma/client';
+import { resolveLocation, locationWhere, guardRecordLocation } from '../../middleware/locationAuth';
 
-const prisma = new PrismaClient();
+import { prisma } from '../../lib/prisma';
+import { findOrCreateAccount, resolvePaymentAccount, parsePositiveAmount } from '../../lib/accounts';
 const router = Router();
 
 router.use(authenticate);
 
-async function findOrCreateAccount(
-  tx: any,
-  companyId: string,
-  name: string,
-  type: string
-) {
-  const existing = await tx.account.findFirst({ where: { companyId, name } });
-  if (existing) return existing;
-  return tx.account.create({ data: { companyId, name, type, balance: 0 } });
-}
+// Every /:id route: the purchase must belong to this company and to a
+// location the user can access.
+router.param(
+  'id',
+  guardRecordLocation((id, companyId) =>
+    prisma.purchase.findFirst({ where: { id, companyId }, select: { locationId: true } })
+  )
+);
+
 
 function computeStatus(
   total: number,
@@ -149,17 +148,12 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 router.post('/:id/pay', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const companyId = req.user!.companyId;
-    const { amount, method = 'cash', account = 'Cash', reference, notes } = req.body as {
-      amount: number;
+    const { method = 'cash', reference, notes } = req.body as {
       method?: string;
-      account?: string;
       reference?: string;
       notes?: string;
     };
-
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ success: false, message: 'Invalid payment amount' });
-    }
+    const amount = parsePositiveAmount(req.body?.amount);
 
     const purchase = await prisma.purchase.findFirst({
       where: { id: req.params.id, companyId },
@@ -173,7 +167,19 @@ router.post('/:id/pay', resolveLocation, async (req: Request, res: Response, nex
       return res.status(400).json({ success: false, message: 'This purchase is already fully paid' });
     }
 
-    const payAmount = Math.min(Number(amount), balance);
+    if (amount > balance + 0.01) {
+      return res.status(400).json({
+        success: false,
+        message: `Amount is more than the balance owed (${balance.toFixed(2)})`,
+      });
+    }
+    const payAmount = Math.min(amount, balance);
+
+    // Validate the paying account before writing anything.
+    const payFromAccount = await resolvePaymentAccount(prisma, companyId, {
+      accountId: req.body?.accountId,
+      account: req.body?.account,
+    });
     const newPaid = purchase.amountPaid + payAmount;
     const newStatus = computeStatus(purchase.total, newPaid, purchase.dueDate);
 
@@ -186,7 +192,7 @@ router.post('/:id/pay', resolveLocation, async (req: Request, res: Response, nex
           purchaseId: purchase.id,
           amount: payAmount,
           method,
-          account,
+          account: payFromAccount.name,
           reference,
           notes,
         },
@@ -200,7 +206,7 @@ router.post('/:id/pay', resolveLocation, async (req: Request, res: Response, nex
 
       // 3. Accounting: AP down, Cash down
       const apAccount = await findOrCreateAccount(tx, companyId, 'Accounts Payable', 'liability');
-      const cashAccount = await findOrCreateAccount(tx, companyId, account, 'asset');
+      const cashAccount = payFromAccount;
 
       await tx.transaction.create({
         data: {
