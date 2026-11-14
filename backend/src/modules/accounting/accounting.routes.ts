@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
-import { resolveLocation, locationWhere } from '../../middleware/locationAuth';
+import { resolveLocation, locationWhere, requireTargetLocation } from '../../middleware/locationAuth';
 
 import { prisma } from '../../lib/prisma';
 import { badRequest } from '../../lib/errors';
@@ -16,10 +16,6 @@ router.use(authenticate);
 
 const findOrCreateAccount = (companyId: string, name: string, type: string) =>
   findOrCreateSystemAccount(prisma, companyId, name, type);
-
-function targetLocationId(req: Request): string {
-  return req.locationId || req.allowedLocationIds[0];
-}
 
 // ---------- ACCOUNTS (business-level) ----------
 router.get('/accounts', async (req: Request, res: Response, next: NextFunction) => {
@@ -116,7 +112,7 @@ router.post('/expenses', resolveLocation, async (req: Request, res: Response, ne
       accountId: req.body?.accountId,
       account: req.body?.account,
     });
-    const locationId = targetLocationId(req);
+    const locationId = requireTargetLocation(req);
 
     const result = await prisma.$transaction(async (tx) => {
       const expense = await tx.transaction.create({

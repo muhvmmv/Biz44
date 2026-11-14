@@ -145,6 +145,9 @@ model Purchase {
   subtotal   Float             @default(0)
   total      Float             @default(0)
   amountPaid Float             @default(0)
+  /// Value of goods returned to the supplier and deducted from this purchase.
+  /// Amount owed = total - amountPaid - returnedAmount.
+  returnedAmount Float         @default(0)
   status     String            @default("unpaid")
   notes      String?
   createdAt  DateTime          @default(now())
@@ -183,7 +186,8 @@ model Invoice {
   customerAddress String?
   customerEmail   String?
   customerPhone   String?
-  invoiceNumber String    @unique
+  /// Unique within a company (each company numbers its own invoices INV-0001, INV-0002, ...).
+  invoiceNumber String
   status        String    @default("draft")
   subtotal      Float     @default(0)
   discountTotal Float     @default(0)
@@ -198,6 +202,7 @@ model Invoice {
   items         InvoiceItem[]
   payments      Payment[]
  
+  @@unique([companyId, invoiceNumber])
   @@index([companyId, locationId])
   @@map("invoices")
 }

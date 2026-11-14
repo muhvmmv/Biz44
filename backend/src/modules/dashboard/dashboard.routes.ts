@@ -3,6 +3,8 @@ import { authenticate } from '../../middleware/auth';
 import { resolveLocation, locationWhere } from '../../middleware/locationAuth';
 
 import { prisma } from '../../lib/prisma';
+import { stockByProduct } from '../../lib/inventory';
+import { purchaseBalance } from '../purchases/purchase.service';
 const router = Router();
 
 router.use(authenticate);
@@ -69,14 +71,14 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
     // ---- Supplier outstanding ----
     const purchases = await prisma.purchase.findMany({
       where: { companyId, ...locFilter },
-      select: { total: true, amountPaid: true, dueDate: true },
+      select: { total: true, amountPaid: true, returnedAmount: true, dueDate: true },
     });
     let supplierOutstanding = 0;
     let supplierUnpaidCount = 0;
     let supplierOverdueAmount = 0;
     let supplierOverdueCount = 0;
     for (const p of purchases) {
-      const bal = p.total - p.amountPaid;
+      const bal = purchaseBalance(p);
       if (bal > 0.01) {
         supplierOutstanding += bal;
         supplierUnpaidCount += 1;
@@ -88,14 +90,20 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
     }
 
     // ---- Inventory ----
+    // Stock comes from batches at the selected location(s), not the
+    // company-wide cache, so a single branch shows its own stock.
     const products = await prisma.product.findMany({
       where: { companyId },
-      select: { quantity: true, reorderPoint: true, price: true, cost: true, totalCostValue: true },
+      select: { id: true, reorderPoint: true },
     });
-    const totalUnits = products.reduce((s, p) => s + p.quantity, 0);
-    const inventoryValue = products.reduce((s, p) => s + p.totalCostValue, 0);
-    const lowStock = products.filter((p) => p.quantity > 0 && p.quantity <= p.reorderPoint).length;
-    const outOfStock = products.filter((p) => p.quantity === 0).length;
+    const stock = await stockByProduct(prisma, companyId, req.locationId ?? req.allowedLocationIds);
+    const qtyOf = (id: string) => stock.get(id)?.quantity ?? 0;
+    const totalUnits = products.reduce((s, p) => s + qtyOf(p.id), 0);
+    const inventoryValue = Math.round(
+      Array.from(stock.values()).reduce((s, v) => s + v.value, 0) * 100
+    ) / 100;
+    const lowStock = products.filter((p) => qtyOf(p.id) > 0 && qtyOf(p.id) <= p.reorderPoint).length;
+    const outOfStock = products.filter((p) => qtyOf(p.id) === 0).length;
 
     // ---- Top products ----
     const productSales: Record<string, number> = {};

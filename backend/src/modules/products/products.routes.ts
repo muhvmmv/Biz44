@@ -1,10 +1,10 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
-import { resolveLocation } from '../../middleware/locationAuth';
+import { resolveLocation, requireTargetLocation } from '../../middleware/locationAuth';
 import { CrudService, pick } from '../../services/crud.service';
 import { prisma } from '../../lib/prisma';
 import { badRequest } from '../../lib/errors';
-import { findOrCreateAccount } from '../../lib/accounts';
+import { addStock, postInventoryIncrease, syncProductTotals, stockByProduct } from '../../lib/inventory';
 
 const router = Router();
 const productService = new CrudService('product');
@@ -32,10 +32,36 @@ function normalize(data: Record<string, any>) {
   return data;
 }
 
-router.get('/', async (req: Request, res: Response, next: NextFunction) => {
+/**
+ * Replace the cached company-wide quantity/value with stock from batches at
+ * the selected location(s). `recordedQuantity` keeps the cached number and
+ * `needsStockCheck` flags products where the cache and batches disagree
+ * company-wide (see Inventory → Stock Check).
+ */
+async function withLocationStock(req: Request, products: any[]) {
+  const companyId = req.user!.companyId;
+  const ids = products.map((p) => p.id);
+  const [scoped, companyWide] = await Promise.all([
+    stockByProduct(prisma, companyId, req.locationId ?? req.allowedLocationIds, ids),
+    stockByProduct(prisma, companyId, null, ids),
+  ]);
+  return products.map((p) => {
+    const here = scoped.get(p.id) || { quantity: 0, value: 0 };
+    const all = companyWide.get(p.id) || { quantity: 0, value: 0 };
+    return {
+      ...p,
+      quantity: here.quantity,
+      totalCostValue: here.value,
+      recordedQuantity: p.quantity,
+      needsStockCheck: p.quantity !== all.quantity,
+    };
+  });
+}
+
+router.get('/', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const products = await productService.findMany(req.user!.companyId, { orderBy: { name: 'asc' } });
-    res.json({ success: true, data: products });
+    res.json({ success: true, data: await withLocationStock(req, products) });
   } catch (err) { next(err); }
 });
 
@@ -53,78 +79,43 @@ router.post('/', resolveLocation, async (req: Request, res: Response, next: Next
       throw badRequest('Opening quantity must be a whole number of 0 or more');
     }
     const unitCost = data.cost ?? 0;
-    const locationId = req.locationId || req.allowedLocationIds[0];
+    // Opening stock must go to a specific location.
+    const locationId = openingQty > 0 ? requireTargetLocation(req) : null;
 
     const product = await prisma.$transaction(async (tx) => {
       const created = await tx.product.create({
-        data: {
-          ...data,
-          name: String(data.name).trim(),
-          companyId,
-          quantity: openingQty,
-          totalCostValue: openingQty * unitCost,
-        },
+        data: { ...data, name: String(data.name).trim(), companyId, quantity: 0, totalCostValue: 0 },
       });
 
       if (openingQty > 0) {
-        const batch = await tx.inventoryBatch.create({
-          data: {
-            companyId,
-            locationId,
-            productId: created.id,
-            quantityReceived: openingQty,
-            quantityRemaining: openingQty,
-            unitCost,
-            sellingPriceSnapshot: created.price,
-            reference: 'Opening stock',
-          },
+        const { totalCost } = await addStock(tx, {
+          companyId,
+          locationId,
+          productId: created.id,
+          quantity: openingQty,
+          unitCost,
+          sellingPriceSnapshot: created.price,
+          type: 'opening',
+          reference: 'Opening stock',
         });
-        await tx.stockMovement.create({
-          data: {
-            companyId,
-            locationId,
-            productId: created.id,
-            batchId: batch.id,
-            type: 'opening',
-            quantity: openingQty,
-            balance: openingQty,
-            unitCost,
-            totalCost: openingQty * unitCost,
-            reference: 'Opening stock',
-          },
+        await postInventoryIncrease(tx, {
+          companyId, locationId, amount: totalCost, description: `Opening stock: ${created.name}`,
         });
-
-        const value = openingQty * unitCost;
-        if (value > 0) {
-          const inventoryAccount = await findOrCreateAccount(tx, companyId, 'Inventory', 'asset');
-          await tx.account.update({
-            where: { id: inventoryAccount.id },
-            data: { balance: { increment: value } },
-          });
-          await tx.transaction.create({
-            data: {
-              companyId,
-              locationId,
-              accountId: inventoryAccount.id,
-              type: 'inventory',
-              description: `Opening stock: ${created.name}`,
-              amount: value,
-            },
-          });
-        }
+        await syncProductTotals(tx, companyId, [created.id]);
       }
 
-      return created;
+      return tx.product.findUnique({ where: { id: created.id } });
     });
 
     res.status(201).json({ success: true, data: product });
   } catch (err) { next(err); }
 });
 
-router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/:id', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const product = await productService.findOne(req.params.id, req.user!.companyId);
-    res.json({ success: true, data: product });
+    const [scoped] = await withLocationStock(req, [product]);
+    res.json({ success: true, data: scoped });
   } catch (err) { next(err); }
 });
 

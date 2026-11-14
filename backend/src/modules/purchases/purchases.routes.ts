@@ -4,6 +4,7 @@ import { resolveLocation, locationWhere, guardRecordLocation } from '../../middl
 
 import { prisma } from '../../lib/prisma';
 import { findOrCreateAccount, resolvePaymentAccount, parsePositiveAmount } from '../../lib/accounts';
+import { purchaseBalance, purchaseStatus, returnToSupplier } from './purchase.service';
 const router = Router();
 
 router.use(authenticate);
@@ -17,20 +18,6 @@ router.param(
   )
 );
 
-
-function computeStatus(
-  total: number,
-  amountPaid: number,
-  dueDate: Date | null
-): string {
-  if (amountPaid >= total - 0.01) return 'paid';
-  if (amountPaid > 0) {
-    if (dueDate && new Date() > dueDate) return 'overdue';
-    return 'partially_paid';
-  }
-  if (dueDate && new Date() > dueDate) return 'overdue';
-  return 'unpaid';
-}
 
 // ---------- LIST ----------
 // Query params: status (paid|unpaid|partially_paid|overdue|all), supplierId, from, to
@@ -81,6 +68,7 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
         id: true,
         total: true,
         amountPaid: true,
+        returnedAmount: true,
         status: true,
         dueDate: true,
       },
@@ -93,7 +81,7 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
     let overdueCount = 0;
 
     for (const p of purchases) {
-      const balance = p.total - p.amountPaid;
+      const balance = purchaseBalance(p);
       if (balance > 0.01) {
         outstanding += balance;
         unpaidCount += 1;
@@ -133,7 +121,15 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
           orderBy: { paidAt: 'desc' },
         },
         batches: {
-          select: { id: true, quantityReceived: true, unitCost: true },
+          select: {
+            id: true,
+            productId: true,
+            quantityReceived: true,
+            quantityRemaining: true,
+            unitCost: true,
+            product: { select: { name: true } },
+          },
+          orderBy: { createdAt: 'asc' },
         },
       },
     });
@@ -162,7 +158,7 @@ router.post('/:id/pay', resolveLocation, async (req: Request, res: Response, nex
       return res.status(404).json({ success: false, message: 'Purchase not found' });
     }
 
-    const balance = purchase.total - purchase.amountPaid;
+    const balance = purchaseBalance(purchase);
     if (balance <= 0.01) {
       return res.status(400).json({ success: false, message: 'This purchase is already fully paid' });
     }
@@ -181,7 +177,7 @@ router.post('/:id/pay', resolveLocation, async (req: Request, res: Response, nex
       account: req.body?.account,
     });
     const newPaid = purchase.amountPaid + payAmount;
-    const newStatus = computeStatus(purchase.total, newPaid, purchase.dueDate);
+    const newStatus = purchaseStatus({ ...purchase, amountPaid: newPaid });
 
     const result = await prisma.$transaction(async (tx) => {
       // 1. Record the payment
@@ -248,10 +244,29 @@ router.post('/:id/pay', resolveLocation, async (req: Request, res: Response, nex
       data: {
         payment: result,
         amountPaid: newPaid,
-        outstanding: purchase.total - newPaid,
+        outstanding: purchaseBalance({ ...purchase, amountPaid: newPaid }),
         status: newStatus,
       },
     });
+  } catch (err) { next(err); }
+});
+
+// ---------- RETURN GOODS TO SUPPLIER ----------
+// body: { batchId, quantity, refundAccountId?, reference?, notes? }
+router.post('/:id/return', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { batchId, quantity, refundAccountId, reference, notes } = req.body || {};
+    if (!batchId) return res.status(400).json({ success: false, message: 'Choose which delivery line to return' });
+    const result = await returnToSupplier({
+      companyId: req.user!.companyId,
+      purchaseId: req.params.id,
+      batchId,
+      quantity,
+      refundAccountId,
+      reference,
+      notes,
+    });
+    res.json({ success: true, data: result });
   } catch (err) { next(err); }
 });
 

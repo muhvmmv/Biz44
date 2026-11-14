@@ -4,6 +4,7 @@ import { CrudService, pick } from '../../services/crud.service';
 import { badRequest } from '../../lib/errors';
 
 import { prisma } from '../../lib/prisma';
+import { purchaseBalance } from '../purchases/purchase.service';
 const router = Router();
 const supplierService = new CrudService('supplier');
 
@@ -28,7 +29,8 @@ router.get('/:id/summary', async (req: Request, res: Response, next: NextFunctio
 
     const totalPurchased = purchases.reduce((s, p) => s + p.total, 0);
     const totalPaid = purchases.reduce((s, p) => s + p.amountPaid, 0);
-    const outstanding = totalPurchased - totalPaid;
+    const totalReturned = purchases.reduce((s, p) => s + (p.returnedAmount ?? 0), 0);
+    const outstanding = purchases.reduce((s, p) => s + Math.max(0, purchaseBalance(p)), 0);
 
     const receipts = purchases.flatMap((p) =>
       p.items.map((it) => ({
@@ -49,6 +51,7 @@ router.get('/:id/summary', async (req: Request, res: Response, next: NextFunctio
         summary: {
           totalPurchased,
           totalPaid,
+          totalReturned,
           outstanding,
           purchaseCount: purchases.length,
           totalUnits: receipts.reduce((s, r) => s + r.quantity, 0),

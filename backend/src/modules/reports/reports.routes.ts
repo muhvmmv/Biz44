@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { authenticate } from '../../middleware/auth';
 
 import { prisma } from '../../lib/prisma';
+import { stockByProduct } from '../../lib/inventory';
+import { resolveLocation } from '../../middleware/locationAuth';
 const router = Router();
 
 router.use(authenticate);
@@ -88,17 +90,26 @@ router.get('/top-customers', async (req, res, next) => {
 });
 
 // INVENTORY VALUATION
-router.get('/inventory-valuation', async (req, res, next) => {
+// Value at cost comes from the actual batches (each at its own purchase or
+// production cost), not quantity × latest cost.
+router.get('/inventory-valuation', resolveLocation, async (req, res, next) => {
   try {
+    const companyId = req.user!.companyId;
     const products = await prisma.product.findMany({
-      where: { companyId: req.user?.companyId },
-      select: { name: true, sku: true, quantity: true, cost: true, price: true },
+      where: { companyId },
+      select: { id: true, name: true, sku: true, cost: true, price: true },
+      orderBy: { name: 'asc' },
     });
-    const data = products.map((p) => ({
-      ...p,
-      valueAtCost: p.quantity * p.cost,
-      valueAtPrice: p.quantity * p.price,
-    }));
+    const stock = await stockByProduct(prisma, companyId, req.locationId ?? req.allowedLocationIds);
+    const data = products.map(({ id, ...p }) => {
+      const s = stock.get(id) || { quantity: 0, value: 0 };
+      return {
+        ...p,
+        quantity: s.quantity,
+        valueAtCost: s.value,
+        valueAtPrice: Math.round(s.quantity * p.price * 100) / 100,
+      };
+    });
     res.json({ success: true, data });
   } catch (err) { next(err); }
 });

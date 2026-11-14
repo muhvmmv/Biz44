@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 
 import { prisma } from '../lib/prisma';
+import { AppError } from '../lib/errors';
 
 /**
  * Resolves the requested location from:
@@ -101,4 +102,17 @@ export function guardRecordLocation(
       next(err);
     }
   };
+}
+
+
+/**
+ * The single location a write (receive, sell, adjust, count...) applies to.
+ * With exactly one accessible location it is used automatically; with more,
+ * the client must pick one (x-location-id header / locationId), because
+ * silently defaulting would put stock in the wrong place.
+ */
+export function requireTargetLocation(req: Request): string {
+  if (req.locationId) return req.locationId;
+  if (req.allowedLocationIds?.length === 1) return req.allowedLocationIds[0];
+  throw new AppError(400, 'Select a specific location (not "All locations") before making this change');
 }
