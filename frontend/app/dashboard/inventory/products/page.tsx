@@ -11,6 +11,7 @@ import { Card, CardContent } from "@/components/ui/Card";
 import NumericInput from "@/components/ui/NumericInput";
 import { Plus, Pencil, Trash2, Package, Grid, List, AlertTriangle } from "lucide-react";
 import { useCurrency } from "@/hooks/useCurrency";
+import { useOpenOnQuery } from "@/hooks/useOpenOnQuery";
 import { useLocationVersion } from "@/hooks/useLocationRefetch";
 
 interface Product {
@@ -80,6 +81,7 @@ export default function ProductsPage() {
     });
     setShowForm(true);
   };
+  useOpenOnQuery("new", openNew);
 
   const openEdit = (p: Product) => {
     setEditing(p);

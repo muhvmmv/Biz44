@@ -2,6 +2,7 @@
 
 import { InputHTMLAttributes, forwardRef, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { controlClasses } from "./Input";
 
 interface NumericInputProps
   extends Omit<InputHTMLAttributes<HTMLInputElement>, "onChange" | "value" | "type"> {
@@ -96,10 +97,7 @@ const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(
         onChange={handleChange}
         onBlur={handleBlur}
         placeholder={placeholder ?? "0"}
-        className={cn(
-          "w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-brand",
-          className
-        )}
+        className={cn(controlClasses, "h-10 tabular-nums", className)}
         {...props}
       />
     );

@@ -35,7 +35,7 @@ export default function Dialog({ open, onClose, title, description, children, fo
 
   return (
     <div
-      className="no-print fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4"
+      className="no-print fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4 backdrop-blur-[2px]"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -45,7 +45,7 @@ export default function Dialog({ open, onClose, title, description, children, fo
         aria-modal="true"
         aria-labelledby={titleId}
         className={cn(
-          "bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-xl border border-border-soft max-h-[90vh] overflow-y-auto",
+          "bg-surface w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-pop border border-border-soft max-h-[90vh] overflow-y-auto",
           className
         )}
       >

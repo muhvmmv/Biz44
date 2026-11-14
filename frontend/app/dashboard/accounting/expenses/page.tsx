@@ -11,6 +11,7 @@ import { Card, CardContent } from "@/components/ui/Card";
 import NumericInput from "@/components/ui/NumericInput";
 import { Plus, DollarSign } from "lucide-react";
 import { useCurrency } from "@/hooks/useCurrency";
+import { useOpenOnQuery } from "@/hooks/useOpenOnQuery";
 
 interface Expense {
   id: string;
@@ -49,6 +50,7 @@ export default function ExpensesPage() {
       .catch(console.error);
   }, []);
   const [submitting, setSubmitting] = useState(false);
+  useOpenOnQuery("new", () => setShowForm(true));
   const [error, setError] = useState("");
 
   const load = () => {

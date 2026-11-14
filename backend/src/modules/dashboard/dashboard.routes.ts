@@ -7,6 +7,7 @@ import { stockByProduct } from '../../lib/inventory';
 import { purchaseBalance } from '../purchases/purchase.service';
 import { profitAndLoss, cashFlow, monthlyPnl } from '../../lib/reports';
 import { listPaymentAccounts } from '../../lib/accounts';
+import { runStockCheck } from '../../lib/stockCheck';
 const router = Router();
 
 router.use(authenticate);
@@ -154,6 +155,101 @@ router.get('/monthly-chart', resolveLocation, async (req: Request, res: Response
     const months = Math.min(Math.max(parseInt(String(req.query.months || '6')) || 6, 1), 24);
     const data = await monthlyPnl(req.user!.companyId, months, await reportLocationIds(req));
     res.json({ success: true, data });
+  } catch (err) { next(err); }
+});
+
+// ---------- ALERTS ----------
+// Things that need attention, computed from live data (nothing is stored).
+router.get('/alerts', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const companyId = req.user!.companyId;
+    const locFilter = locationWhere(req);
+    const now = new Date();
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    const [openInvoices, purchases, products, stock, cashAccounts, stockReport] = await Promise.all([
+      prisma.invoice.findMany({
+        where: { companyId, status: { in: ['unpaid', 'partially_paid', 'overdue'] }, ...locFilter },
+        select: { total: true, amountPaid: true, dueDate: true },
+      }),
+      prisma.purchase.findMany({
+        where: { companyId, ...locFilter },
+        select: { total: true, amountPaid: true, returnedAmount: true, dueDate: true },
+      }),
+      prisma.product.findMany({ where: { companyId }, select: { id: true, reorderPoint: true } }),
+      stockByProduct(prisma, companyId, req.locationId ?? req.allowedLocationIds),
+      listPaymentAccounts(prisma, companyId),
+      runStockCheck(companyId),
+    ]);
+
+    // `amount` (when present) is shown formatted before `detail` by the client.
+    const alerts: { id: string; severity: 'danger' | 'warning' | 'info'; title: string; detail: string; amount?: number; href: string; count: number }[] = [];
+    const money = (n: number) => Math.round(n * 100) / 100;
+
+    const overdue = openInvoices.filter((i) => i.dueDate && i.dueDate < todayStart);
+    if (overdue.length) {
+      alerts.push({
+        id: 'invoices-overdue', severity: 'danger', count: overdue.length,
+        title: `${overdue.length} overdue invoice${overdue.length === 1 ? '' : 's'}`,
+        amount: money(overdue.reduce((s, i) => s + i.total - i.amountPaid, 0)), detail: 'still to collect',
+        href: '/dashboard/accounting/receivable',
+      });
+    }
+    const dueToday = openInvoices.filter((i) => i.dueDate && i.dueDate >= todayStart && i.dueDate <= todayEnd);
+    if (dueToday.length) {
+      alerts.push({
+        id: 'invoices-due-today', severity: 'info', count: dueToday.length,
+        title: `${dueToday.length} invoice${dueToday.length === 1 ? '' : 's'} due today`,
+        amount: money(dueToday.reduce((s, i) => s + i.total - i.amountPaid, 0)), detail: 'expected today',
+        href: '/dashboard/invoices',
+      });
+    }
+    const supplierOverdue = purchases.filter((p) => p.dueDate && p.dueDate < todayStart && purchaseBalance(p) > 0.009);
+    if (supplierOverdue.length) {
+      alerts.push({
+        id: 'suppliers-overdue', severity: 'danger', count: supplierOverdue.length,
+        title: `${supplierOverdue.length} supplier payment${supplierOverdue.length === 1 ? '' : 's'} overdue`,
+        amount: money(supplierOverdue.reduce((s, p) => s + purchaseBalance(p), 0)), detail: 'owed past the due date',
+        href: '/dashboard/accounting/payable',
+      });
+    }
+    const qty = (id: string) => stock.get(id)?.quantity ?? 0;
+    const out = products.filter((p) => p.reorderPoint > 0 && qty(p.id) <= 0).length;
+    const low = products.filter((p) => qty(p.id) > 0 && qty(p.id) <= p.reorderPoint).length;
+    if (out) {
+      alerts.push({
+        id: 'stock-out', severity: 'danger', count: out,
+        title: `${out} product${out === 1 ? '' : 's'} out of stock`,
+        detail: 'Below the reorder point with nothing on hand', href: '/dashboard/inventory/products',
+      });
+    }
+    if (low) {
+      alerts.push({
+        id: 'stock-low', severity: 'warning', count: low,
+        title: `${low} product${low === 1 ? '' : 's'} running low`,
+        detail: 'At or below the reorder point', href: '/dashboard/inventory/products',
+      });
+    }
+    if (stockReport.summary.issues) {
+      alerts.push({
+        id: 'stock-check', severity: 'warning', count: stockReport.summary.issues,
+        title: `Stock check found ${stockReport.summary.issues} problem${stockReport.summary.issues === 1 ? '' : 's'}`,
+        detail: 'Recorded stock disagrees with stock batches', href: '/dashboard/inventory/stock-check',
+      });
+    }
+    const negative = cashAccounts.filter((a: any) => a.balance < -0.009);
+    if (negative.length) {
+      alerts.push({
+        id: 'cash-negative', severity: 'warning', count: negative.length,
+        title: `${negative.map((a: any) => a.name).join(', ')} below zero`,
+        detail: 'Check for a missing payment in, or correct the opening balance', href: '/dashboard/accounting/accounts',
+      });
+    }
+
+    const order = { danger: 0, warning: 1, info: 2 };
+    alerts.sort((a, b) => order[a.severity] - order[b.severity]);
+    res.json({ success: true, data: alerts });
   } catch (err) { next(err); }
 });
 

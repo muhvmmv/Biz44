@@ -1,7 +1,12 @@
 @import "tailwindcss";
 
 @theme {
-  /* ===== Biz44 brand =====
+  /* =====================================================================
+     Biz44 design tokens. Components use these names, never raw hex values.
+     Live reference: /dashboard/design-system
+     ===================================================================== */
+
+  /* Brand
      brand        bright orange — accents only: active indicators, focus rings,
                   progress, chart highlight, logo. Not for small text on white.
      brand-dark   deep orange — orange text and links (5.6:1 on white).
@@ -15,17 +20,27 @@
   --color-charcoal-dark: #0B0B0D;
   --color-charcoal-light: #EFEFF1;
 
-  --color-ivory: #F7F7F8;
+  /* Surfaces and lines */
+  --color-ivory: #F5F5F7;          /* page background */
+  --color-surface: #FFFFFF;        /* cards, sidebar, header, inputs */
+  --color-surface-muted: #FAFAFB;  /* table headers, inset panels */
   --color-border-soft: #E6E6EA;
+  --color-border-strong: #D4D4DA;
 
+  /* Text */
   --color-ink: #1C1C1F;
-  --color-ink-soft: #66666E;
+  --color-ink-soft: #66666E;       /* secondary text, 5.4:1 on the page */
+  --color-ink-faint: #8E8E96;      /* placeholders only (not for readable text) */
 
-  /* Semantic (kept distinct from the brand orange) */
+  /* Status (kept distinct from the brand orange), each with a soft tint */
   --color-success: #15803D;
+  --color-success-soft: #ECFDF3;
   --color-warning: #A16207;
+  --color-warning-soft: #FEF7E6;
   --color-danger: #B91C1C;
+  --color-danger-soft: #FEF2F2;
   --color-info: #1D4ED8;
+  --color-info-soft: #EFF4FF;
 
   /* Chart palette — brand first, then hues that stay distinct from orange */
   --color-chart-1: #F05A28;
@@ -34,6 +49,16 @@
   --color-chart-4: #16A34A;
   --color-chart-5: #A1A1AA;
   --color-chart-6: #0D9488;
+
+  /* Elevation */
+  --shadow-card: 0 1px 2px rgb(16 16 20 / 0.04), 0 1px 3px rgb(16 16 20 / 0.04);
+  --shadow-raised: 0 4px 12px -2px rgb(16 16 20 / 0.08), 0 2px 4px -2px rgb(16 16 20 / 0.04);
+  --shadow-pop: 0 16px 40px -8px rgb(16 16 20 / 0.18), 0 4px 12px -4px rgb(16 16 20 / 0.08);
+
+  /* Sizes */
+  --spacing-sidebar: 16rem;
+  --spacing-sidebar-collapsed: 4.5rem;
+  --spacing-header: 4rem;
 }
 
 @layer base {
@@ -86,8 +111,11 @@
   }
 }
 
-/* Focus ring uses the brand orange */
-*:focus-visible {
-  outline: 2px solid var(--color-brand);
-  outline-offset: 2px;
+/* Default keyboard focus ring in the brand orange. It lives in the base
+   layer so components can replace it with their own focus style. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
 }
