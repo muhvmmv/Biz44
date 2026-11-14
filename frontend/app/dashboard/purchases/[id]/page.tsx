@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Wallet } from "lucide-react";
+import { ArrowLeft, Wallet, Undo2 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -13,6 +13,7 @@ import NumericInput from "@/components/ui/NumericInput";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { useCurrency } from "@/hooks/useCurrency";
 import PaymentAccountSelect from "@/components/ui/PaymentAccountSelect";
+import Dialog from "@/components/ui/Dialog";
 
 interface PurchaseDetail {
   id: string;
@@ -22,6 +23,7 @@ interface PurchaseDetail {
   subtotal: number;
   total: number;
   amountPaid: number;
+  returnedAmount: number;
   status: string;
   notes: string | null;
   supplier: { id: string; name: string; email: string | null; phone: string | null } | null;
@@ -40,7 +42,24 @@ interface PurchaseDetail {
     reference: string | null;
     paidAt: string;
   }[];
+  batches: {
+    id: string;
+    productId: string;
+    quantityReceived: number;
+    quantityRemaining: number;
+    unitCost: number;
+    product: { name: string };
+  }[];
 }
+
+const METHOD_LABELS: Record<string, string> = {
+  cash: "Cash",
+  bank_transfer: "Bank transfer",
+  cheque: "Cheque",
+  pos: "POS / Card",
+  on_receipt: "Paid on receipt",
+  refund: "Refund from supplier",
+};
 
 const statusVariant = (s: string): "success" | "warning" | "danger" | "info" | "default" => {
   if (s === "paid") return "success";
@@ -68,6 +87,13 @@ export default function PurchaseDetailPage() {
   const [paying, setPaying] = useState(false);
   const [payError, setPayError] = useState("");
 
+  const [returnBatch, setReturnBatch] = useState<PurchaseDetail["batches"][number] | null>(null);
+  const [returnQty, setReturnQty] = useState(0);
+  const [refundAccountId, setRefundAccountId] = useState("");
+  const [returnNotes, setReturnNotes] = useState("");
+  const [returning, setReturning] = useState(false);
+  const [returnError, setReturnError] = useState("");
+
   const fetchPurchase = useCallback(
     () => apiFetch<{ success: boolean; data: PurchaseDetail }>(`/purchases/${id}`).then((r) => r.data),
     [id]
@@ -90,7 +116,45 @@ export default function PurchaseDetailPage() {
     };
   }, [fetchPurchase]);
 
-  const balance = purchase ? purchase.total - purchase.amountPaid : 0;
+  const balance = purchase
+    ? Math.round((purchase.total - purchase.amountPaid - (purchase.returnedAmount || 0)) * 100) / 100
+    : 0;
+  const returnValue = returnBatch ? Math.round(returnQty * returnBatch.unitCost * 100) / 100 : 0;
+  const refundDue = Math.max(0, Math.round((returnValue - Math.max(0, balance)) * 100) / 100);
+
+  const openReturn = (b: PurchaseDetail["batches"][number]) => {
+    setReturnBatch(b);
+    setReturnQty(0);
+    setReturnNotes("");
+    setReturnError("");
+  };
+
+  const submitReturn = async () => {
+    if (!returnBatch) return;
+    setReturnError("");
+    if (returnQty <= 0) return setReturnError("Enter how many units to return.");
+    if (returnQty > returnBatch.quantityRemaining) {
+      return setReturnError(`Only ${returnBatch.quantityRemaining} from this delivery are still in stock.`);
+    }
+    setReturning(true);
+    try {
+      await apiFetch(`/purchases/${id}/return`, {
+        method: "POST",
+        body: JSON.stringify({
+          batchId: returnBatch.id,
+          quantity: returnQty,
+          refundAccountId: refundDue > 0 ? refundAccountId : undefined,
+          notes: returnNotes || undefined,
+        }),
+      });
+      setReturnBatch(null);
+      setPurchase(await fetchPurchase());
+    } catch (err: unknown) {
+      setReturnError(err instanceof Error ? err.message : "Return failed");
+    } finally {
+      setReturning(false);
+    }
+  };
 
   const handlePay = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -151,7 +215,7 @@ export default function PurchaseDetailPage() {
         actions={<Badge variant={statusVariant(purchase.status)}>{purchase.status.replace("_", " ")}</Badge>}
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className={`grid grid-cols-1 gap-4 ${purchase.returnedAmount > 0 ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
         <Card>
           <CardContent className="p-5">
             <p className="text-sm text-ink-soft">Total</p>
@@ -164,6 +228,14 @@ export default function PurchaseDetailPage() {
             <p className="text-2xl font-bold mt-1 text-success">{format(purchase.amountPaid)}</p>
           </CardContent>
         </Card>
+        {purchase.returnedAmount > 0 && (
+          <Card>
+            <CardContent className="p-5">
+              <p className="text-sm text-ink-soft">Returned to supplier</p>
+              <p className="text-2xl font-bold mt-1 text-ink">{format(purchase.returnedAmount)}</p>
+            </CardContent>
+          </Card>
+        )}
         <Card>
           <CardContent className="p-5">
             <p className="text-sm text-ink-soft">Balance owed</p>
@@ -190,23 +262,49 @@ export default function PurchaseDetailPage() {
                 <thead className="bg-ivory text-ink-soft text-left">
                   <tr>
                     <th className="px-5 py-3 font-medium">Product</th>
-                    <th className="px-5 py-3 font-medium text-right">Qty</th>
+                    <th className="px-5 py-3 font-medium text-right">Received</th>
+                    {purchase.batches.length > 0 && (
+                      <th className="px-5 py-3 font-medium text-right">In stock</th>
+                    )}
                     <th className="px-5 py-3 font-medium text-right">Unit cost</th>
                     <th className="px-5 py-3 font-medium text-right">Total</th>
+                    {purchase.batches.length > 0 && <th className="px-5 py-3" />}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border-soft">
-                  {purchase.items.map((it) => (
-                    <tr key={it.id}>
-                      <td className="px-5 py-3">
-                        <p className="font-medium text-ink">{it.product.name}</p>
-                        {it.product.sku && <p className="text-xs text-ink-soft">{it.product.sku}</p>}
-                      </td>
-                      <td className="px-5 py-3 text-right tabular-nums">{it.quantity}</td>
-                      <td className="px-5 py-3 text-right tabular-nums">{format(it.unitCost)}</td>
-                      <td className="px-5 py-3 text-right tabular-nums font-medium">{format(it.total)}</td>
-                    </tr>
-                  ))}
+                  {purchase.batches.length > 0
+                    ? purchase.batches.map((b) => (
+                        <tr key={b.id}>
+                          <td className="px-5 py-3 font-medium text-ink">{b.product.name}</td>
+                          <td className="px-5 py-3 text-right tabular-nums">{b.quantityReceived}</td>
+                          <td className="px-5 py-3 text-right tabular-nums">{b.quantityRemaining}</td>
+                          <td className="px-5 py-3 text-right tabular-nums">{format(b.unitCost)}</td>
+                          <td className="px-5 py-3 text-right tabular-nums font-medium">
+                            {format(b.quantityReceived * b.unitCost)}
+                          </td>
+                          <td className="px-5 py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => openReturn(b)}
+                              disabled={b.quantityRemaining <= 0}
+                              className="inline-flex items-center gap-1 text-sm font-medium text-brand-dark hover:underline disabled:text-ink-soft disabled:no-underline disabled:cursor-not-allowed"
+                            >
+                              <Undo2 size={14} /> Return
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    : purchase.items.map((it) => (
+                        <tr key={it.id}>
+                          <td className="px-5 py-3">
+                            <p className="font-medium text-ink">{it.product.name}</p>
+                            {it.product.sku && <p className="text-xs text-ink-soft">{it.product.sku}</p>}
+                          </td>
+                          <td className="px-5 py-3 text-right tabular-nums">{it.quantity}</td>
+                          <td className="px-5 py-3 text-right tabular-nums">{format(it.unitCost)}</td>
+                          <td className="px-5 py-3 text-right tabular-nums font-medium">{format(it.total)}</td>
+                        </tr>
+                      ))}
                 </tbody>
               </table>
             </div>
@@ -287,9 +385,11 @@ export default function PurchaseDetailPage() {
                     <tr key={p.id}>
                       <td className="px-5 py-3 text-ink-soft">{new Date(p.paidAt).toLocaleDateString()}</td>
                       <td className="px-5 py-3">{p.account}</td>
-                      <td className="px-5 py-3 capitalize">{p.method.replace("_", " ")}</td>
+                      <td className="px-5 py-3">{METHOD_LABELS[p.method] || p.method.replace("_", " ")}</td>
                       <td className="px-5 py-3 text-ink-soft">{p.reference || "—"}</td>
-                      <td className="px-5 py-3 text-right tabular-nums font-medium">{format(p.amount)}</td>
+                      <td className={`px-5 py-3 text-right tabular-nums font-medium ${p.amount < 0 ? "text-success" : ""}`}>
+                        {format(p.amount)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -298,6 +398,63 @@ export default function PurchaseDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog
+        open={returnBatch !== null}
+        onClose={() => setReturnBatch(null)}
+        title="Return to supplier"
+        description={
+          returnBatch
+            ? `${returnBatch.product.name} · ${returnBatch.quantityRemaining} from this delivery still in stock at ${format(returnBatch.unitCost)} each`
+            : undefined
+        }
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setReturnBatch(null)}>Cancel</Button>
+            <Button onClick={submitReturn} isLoading={returning}>Record return</Button>
+          </>
+        }
+      >
+        <div>
+          <label className="block text-sm font-medium mb-1">Units to return</label>
+          <NumericInput
+            allowDecimals={false}
+            min={0}
+            max={returnBatch?.quantityRemaining}
+            value={returnQty}
+            onChange={setReturnQty}
+          />
+        </div>
+        {returnValue > 0 && (
+          <div className="rounded-xl bg-ivory p-4 text-sm space-y-1">
+            <div className="flex justify-between">
+              <span className="text-ink-soft">Value returned</span>
+              <span className="font-medium tabular-nums">{format(returnValue)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-ink-soft">Taken off what you owe</span>
+              <span className="font-medium tabular-nums">{format(returnValue - refundDue)}</span>
+            </div>
+            {refundDue > 0 && (
+              <div className="flex justify-between">
+                <span className="text-ink-soft">Refund due from supplier</span>
+                <span className="font-medium tabular-nums text-success">{format(refundDue)}</span>
+              </div>
+            )}
+          </div>
+        )}
+        {refundDue > 0 && (
+          <div>
+            <label className="block text-sm font-medium mb-1">Refund received into</label>
+            <PaymentAccountSelect value={refundAccountId} onChange={setRefundAccountId} />
+          </div>
+        )}
+        <div>
+          <label className="block text-sm font-medium mb-1">Reason / notes (optional)</label>
+          <input value={returnNotes} onChange={(e) => setReturnNotes(e.target.value)} className={inputClass} />
+        </div>
+        {returnError && <p className="text-sm text-danger">{returnError}</p>}
+      </Dialog>
     </div>
   );
 }

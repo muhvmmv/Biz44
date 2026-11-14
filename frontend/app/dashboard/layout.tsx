@@ -31,6 +31,7 @@ const navigation: NavItem[] = [
       { name: "Products", href: "/dashboard/inventory/products" },
       { name: "Receive Inventory", href: "/dashboard/inventory/receive" },
       { name: "Stock Movements", href: "/dashboard/inventory/movements" },
+      { name: "Stock Check", href: "/dashboard/inventory/stock-check" },
     ],
   },
   { name: "Suppliers", href: "/dashboard/suppliers", icon: Truck },

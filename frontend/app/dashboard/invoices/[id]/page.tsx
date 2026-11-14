@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import PaymentAccountSelect from "@/components/ui/PaymentAccountSelect";
+import Dialog from "@/components/ui/Dialog";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
@@ -83,6 +84,10 @@ export default function InvoiceDetailPage() {
   const [payReference, setPayReference] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [showCancel, setShowCancel] = useState(false);
+  const [refundAccountId, setRefundAccountId] = useState("");
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState("");
 
   const load = useCallback(async () => {
     const [invRes, bizRes] = await Promise.all([
@@ -128,18 +133,25 @@ export default function InvoiceDetailPage() {
     }
   };
 
-  const cancel = async () => {
-    if (
-      !confirm(
-        "Cancel this invoice? Stock will be reversed if it was finalized."
-      )
-    )
-      return;
+  const cancel = () => {
+    setCancelError("");
+    setShowCancel(true);
+  };
+
+  const confirmCancel = async () => {
+    setCancelError("");
+    setCancelling(true);
     try {
-      await apiFetch(`/invoices/${id}/cancel`, { method: "POST" });
+      await apiFetch(`/invoices/${id}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ refundAccountId: refundAccountId || undefined }),
+      });
+      setShowCancel(false);
       load();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Failed");
+      setCancelError(err instanceof Error ? err.message : "Could not cancel the invoice");
+    } finally {
+      setCancelling(false);
     }
   };
 
@@ -242,6 +254,11 @@ export default function InvoiceDetailPage() {
                     <CheckCircle2 className="w-4 h-4 mr-1" /> Finalize
                   </Button>
                 </>
+              )}
+              {invoice.status === "paid" && (
+                <Button variant="outline" onClick={cancel}>
+                  <XCircle className="w-4 h-4 mr-1" /> Cancel
+                </Button>
               )}
               {["unpaid", "partially_paid", "overdue"].includes(invoice.status) && (
                 <>
@@ -535,6 +552,37 @@ export default function InvoiceDetailPage() {
           </div>
         </div>
       )}
+
+      <Dialog
+        open={showCancel}
+        onClose={() => setShowCancel(false)}
+        title={`Cancel ${invoice.invoiceNumber}?`}
+        description={
+          invoice.finalizedAt
+            ? "The sale is reversed: stock goes back to the batches it came from, and revenue and cost of goods sold are reversed."
+            : "This draft will be marked as cancelled."
+        }
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setShowCancel(false)}>Keep invoice</Button>
+            <Button variant="danger" onClick={confirmCancel} isLoading={cancelling}>Cancel invoice</Button>
+          </>
+        }
+      >
+        {invoice.finalizedAt && invoice.amountPaid > 0 && (
+          <div className="space-y-3">
+            <p className="text-sm text-ink">
+              The customer has paid <span className="font-semibold">{format(invoice.amountPaid)}</span>. This amount
+              will be recorded as refunded.
+            </p>
+            <div>
+              <label className="block text-sm font-medium mb-1">Refund paid from</label>
+              <PaymentAccountSelect value={refundAccountId} onChange={setRefundAccountId} />
+            </div>
+          </div>
+        )}
+        {cancelError && <p className="text-sm text-danger">{cancelError}</p>}
+      </Dialog>
     </div>
   );
 }

@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import NumericInput from "@/components/ui/NumericInput";
 import { Plus, Trash2, AlertTriangle } from "lucide-react";
 import { useCurrency } from "@/hooks/useCurrency";
+import { useLocationVersion } from "@/hooks/useLocationRefetch";
 
 interface Customer {
   id: string;
@@ -34,6 +35,7 @@ export default function NewInvoicePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { format } = useCurrency();
+  const version = useLocationVersion();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -56,7 +58,7 @@ export default function NewInvoicePage() {
       setCustomers(c.data);
       setProducts(p.data);
     });
-  }, []);
+  }, [version]);
 
   const updateItem = (idx: number, updates: Partial<LineItem>) =>
     setItems(items.map((it, i) => (i === idx ? { ...it, ...updates } : it)));

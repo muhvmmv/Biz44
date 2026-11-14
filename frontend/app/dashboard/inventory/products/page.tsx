@@ -9,8 +9,9 @@ import Badge from "@/components/ui/Badge";
 import Skeleton from "@/components/ui/Skeleton";
 import { Card, CardContent } from "@/components/ui/Card";
 import NumericInput from "@/components/ui/NumericInput";
-import { Plus, Pencil, Trash2, Package, Grid, List } from "lucide-react";
+import { Plus, Pencil, Trash2, Package, Grid, List, AlertTriangle } from "lucide-react";
 import { useCurrency } from "@/hooks/useCurrency";
+import { useLocationVersion } from "@/hooks/useLocationRefetch";
 
 interface Product {
   id: string;
@@ -21,12 +22,14 @@ interface Product {
   cost: number;
   quantity: number;
   reorderPoint: number;
+  needsStockCheck?: boolean;
 }
 
 type View = "table" | "grid";
 
 export default function ProductsPage() {
   const { format } = useCurrency();
+  const version = useLocationVersion();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -62,7 +65,7 @@ export default function ProductsPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [version]);
 
   const openNew = () => {
     setEditing(null);
@@ -169,6 +172,21 @@ export default function ProductsPage() {
           </div>
         }
       />
+
+      {products.some((p) => p.needsStockCheck) && (
+        <Link
+          href="/dashboard/inventory/stock-check"
+          className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-ink hover:border-amber-300"
+        >
+          <AlertTriangle size={18} className="text-warning shrink-0 mt-0.5" />
+          <span>
+            <span className="font-semibold">
+              {products.filter((p) => p.needsStockCheck).length} product(s) need a stock check.
+            </span>{" "}
+            Their recorded stock disagrees with their stock batches. Open Stock Check to fix them.
+          </span>
+        </Link>
+      )}
 
       <input
         type="text"

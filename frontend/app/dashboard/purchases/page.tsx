@@ -18,6 +18,7 @@ interface Purchase {
   dueDate: string | null;
   total: number;
   amountPaid: number;
+  returnedAmount?: number;
   status: string;
   supplier: { id: string; name: string } | null;
   items: { id: string; quantity: number; unitCost: number }[];
@@ -84,7 +85,7 @@ export default function PurchasesPage() {
   // Summary cards
   const totalPurchases = purchases.reduce((s, p) => s + p.total, 0);
   const totalOutstanding = purchases.reduce(
-    (s, p) => s + (p.total - p.amountPaid),
+    (s, p) => s + Math.max(0, p.total - p.amountPaid - (p.returnedAmount || 0)),
     0
   );
   const overdueCount = purchases.filter((p) => p.status === "overdue").length;
@@ -188,7 +189,7 @@ export default function PurchasesPage() {
                 </thead>
                 <tbody className="divide-y divide-border-soft">
                   {filtered.map((p) => {
-                    const balance = p.total - p.amountPaid;
+                    const balance = p.total - p.amountPaid - (p.returnedAmount || 0);
                     return (
                       <tr key={p.id} className="hover:bg-ivory">
                         <td className="px-6 py-4">
