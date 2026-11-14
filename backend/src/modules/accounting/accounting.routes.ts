@@ -1,76 +1,347 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
-import { resolveLocation, locationWhere, requireTargetLocation } from '../../middleware/locationAuth';
-
+import { resolveLocation, locationWhere, requireTargetLocation, reportLocationIds } from '../../middleware/locationAuth';
 import { prisma } from '../../lib/prisma';
-import { badRequest } from '../../lib/errors';
-import {
-  findOrCreateAccount as findOrCreateSystemAccount,
-  listPaymentAccounts,
-  parsePositiveAmount,
-  resolvePaymentAccount,
-} from '../../lib/accounts';
-const router = Router();
+import { AppError, badRequest, notFound } from '../../lib/errors';
+import { listPaymentAccounts, parsePositiveAmount, resolvePaymentAccount } from '../../lib/accounts';
+import { postJournal, systemAccount, verifyLedger, round2, isDebitNormal, DEFAULT_ACCOUNT_KEYS } from '../../lib/ledger';
+import { profitAndLoss, balanceSheet, trialBalance, cashFlow, monthlyPnl } from '../../lib/reports';
+import { purchaseBalance } from '../purchases/purchase.service';
 
+const router = Router();
 router.use(authenticate);
 
-const findOrCreateAccount = (companyId: string, name: string, type: string) =>
-  findOrCreateSystemAccount(prisma, companyId, name, type);
+const ACCOUNT_TYPES = ['asset', 'liability', 'equity', 'revenue', 'expense'];
+/** Manual journal entries may not touch accounts kept in step with documents. */
+const DOCUMENT_CONTROLLED = new Set(['ar', 'ap', 'inventory']);
 
-// ---------- ACCOUNTS (business-level) ----------
+function requireAdmin(req: Request) {
+  if (req.user!.role !== 'admin') throw new AppError(403, 'Only an admin can do this');
+}
+
+/** Parse a date query/body value. Plain dates (YYYY-MM-DD) as `to` mean end of that day. */
+function parseDate(value: unknown, endOfDay = false): Date | undefined {
+  if (typeof value !== 'string' || !value) return undefined;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) throw badRequest(`Invalid date: ${value}`);
+  if (endOfDay && /^\d{4}-\d{2}-\d{2}$/.test(value)) d.setHours(23, 59, 59, 999);
+  return d;
+}
+
+function periodFromQuery(req: Request) {
+  return { from: parseDate(req.query.from), to: parseDate(req.query.to, true) };
+}
+
+const publicAccount = (a: any) => ({
+  id: a.id,
+  name: a.name,
+  type: a.type,
+  code: a.code,
+  subtype: a.subtype,
+  systemKey: a.systemKey,
+  bankName: a.bankName,
+  accountNumber: a.accountNumber,
+  isActive: a.isActive,
+  balance: round2(a.balance),
+});
+
+// =====================================================================
+// CHART OF ACCOUNTS
+// =====================================================================
+
 router.get('/accounts', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const companyId = req.user?.companyId!;
-
-    const defaults = [
-      { name: 'Cash', type: 'asset' },
-      { name: 'Bank Account', type: 'asset' },
-      { name: 'Accounts Receivable', type: 'asset' },
-      { name: 'Inventory', type: 'asset' },
-      { name: 'Accounts Payable', type: 'liability' },
-      { name: 'Sales Revenue', type: 'revenue' },
-      { name: 'Cost of Goods Sold', type: 'expense' },
-      { name: 'Operating Expenses', type: 'expense' },
-      { name: 'Inventory Loss', type: 'expense' },
-      { name: 'Rent Expense', type: 'expense' },
-      { name: 'Utilities Expense', type: 'expense' },
-      { name: 'Salary Expense', type: 'expense' },
-      { name: 'General Expense', type: 'expense' },
-    ];
-    for (const d of defaults) await findOrCreateAccount(companyId, d.name, d.type);
-
+    const companyId = req.user!.companyId;
+    for (const key of DEFAULT_ACCOUNT_KEYS) await systemAccount(prisma, companyId, key);
     const accounts = await prisma.account.findMany({
       where: { companyId },
-      orderBy: [{ type: 'asc' }, { name: 'asc' }],
+      orderBy: [{ code: 'asc' }, { name: 'asc' }],
     });
-    res.json({ success: true, data: accounts });
+    res.json({ success: true, data: accounts.map(publicAccount) });
   } catch (err) { next(err); }
 });
 
-// ---------- PAYMENT ACCOUNTS (cash + bank) ----------
-// The accounts money can be paid from or received into.
+// Create an account: a bank account, an expense category, an equity account...
+router.post('/accounts', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    requireAdmin(req);
+    const companyId = req.user!.companyId;
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 80) : '';
+    if (!name) throw badRequest('Account name is required');
+    let type = String(req.body?.type || '');
+    let subtype: string | null = req.body?.subtype === 'bank' || req.body?.subtype === 'cash' ? req.body.subtype : null;
+    if (subtype) type = 'asset';
+    if (!ACCOUNT_TYPES.includes(type)) throw badRequest('Account type must be asset, liability, equity, revenue or expense');
+    const clash = await prisma.account.findFirst({ where: { companyId, name: { equals: name, mode: 'insensitive' } } });
+    if (clash) throw badRequest(`An account named "${clash.name}" already exists`);
+
+    let code: string | null = typeof req.body?.code === 'string' && req.body.code.trim() ? req.body.code.trim() : null;
+    if (!code && subtype === 'bank') {
+      const banks = await prisma.account.count({ where: { companyId, subtype: 'bank' } });
+      code = String(1010 + banks * 10);
+    }
+    const account = await prisma.account.create({
+      data: {
+        companyId,
+        name,
+        type,
+        subtype,
+        code,
+        bankName: req.body?.bankName || null,
+        accountNumber: req.body?.accountNumber || null,
+        balance: 0,
+      },
+    });
+    res.status(201).json({ success: true, data: publicAccount(account) });
+  } catch (err) { next(err); }
+});
+
+// Rename an account or change its bank details; deactivate unused accounts.
+router.put('/accounts/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    requireAdmin(req);
+    const companyId = req.user!.companyId;
+    const account = await prisma.account.findFirst({ where: { id: req.params.id, companyId } });
+    if (!account) throw notFound('Account not found');
+    const data: any = {};
+    if (req.body?.name !== undefined) {
+      const name = String(req.body.name).trim().slice(0, 80);
+      if (!name) throw badRequest('Account name is required');
+      const clash = await prisma.account.findFirst({
+        where: { companyId, id: { not: account.id }, name: { equals: name, mode: 'insensitive' } },
+      });
+      if (clash) throw badRequest(`An account named "${clash.name}" already exists`);
+      data.name = name;
+    }
+    for (const f of ['bankName', 'accountNumber', 'code'] as const) {
+      if (req.body?.[f] !== undefined) data[f] = req.body[f] ? String(req.body[f]).trim() : null;
+    }
+    if (req.body?.isActive !== undefined) {
+      const isActive = !!req.body.isActive;
+      if (!isActive && account.systemKey) throw badRequest('System accounts cannot be deactivated');
+      if (!isActive && Math.abs(account.balance) > 0.009) {
+        throw badRequest('Only accounts with a zero balance can be deactivated. Transfer the balance first.');
+      }
+      data.isActive = isActive;
+    }
+    const updated = await prisma.account.update({ where: { id: account.id }, data });
+    res.json({ success: true, data: publicAccount(updated) });
+  } catch (err) { next(err); }
+});
+
+// Account statement: opening balance, every movement with running balance, closing.
+router.get('/accounts/:id/statement', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const companyId = req.user!.companyId;
+    const account = await prisma.account.findFirst({ where: { id: req.params.id, companyId } });
+    if (!account) throw notFound('Account not found');
+    const { from, to } = periodFromQuery(req);
+    const sign = isDebitNormal(account.type) ? 1 : -1;
+
+    let opening = 0;
+    if (from) {
+      const agg = await prisma.journalLine.aggregate({
+        where: { companyId, accountId: account.id, entry: { date: { lt: from } } },
+        _sum: { debit: true, credit: true },
+      });
+      opening = round2(sign * (Number(agg._sum.debit ?? 0) - Number(agg._sum.credit ?? 0)));
+    }
+    const lines = await prisma.journalLine.findMany({
+      where: {
+        companyId,
+        accountId: account.id,
+        entry: { ...(from || to ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}) },
+      },
+      include: { entry: { select: { id: true, date: true, description: true, sourceType: true, reference: true } } },
+      orderBy: [{ entry: { date: 'asc' } }, { entry: { createdAt: 'asc' } }],
+      take: 2000,
+    });
+    let running = opening;
+    const rows = lines.map((l) => {
+      const debit = Number(l.debit);
+      const credit = Number(l.credit);
+      running = round2(running + sign * (debit - credit));
+      return {
+        entryId: l.entry.id,
+        date: l.entry.date,
+        description: l.entry.description,
+        sourceType: l.entry.sourceType,
+        reference: l.entry.reference,
+        debit,
+        credit,
+        balance: running,
+      };
+    });
+    res.json({
+      success: true,
+      data: { account: publicAccount(account), from: from ?? null, to: to ?? null, opening, rows, closing: running },
+    });
+  } catch (err) { next(err); }
+});
+
+// =====================================================================
+// CASH & BANKS
+// =====================================================================
+
 router.get('/payment-accounts', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const accounts = await listPaymentAccounts(prisma, req.user!.companyId);
     res.json({
       success: true,
-      data: accounts.map((a: any) => ({ id: a.id, name: a.name, balance: a.balance })),
+      data: accounts.map((a: any) => ({
+        id: a.id, name: a.name, subtype: a.subtype, bankName: a.bankName,
+        accountNumber: a.accountNumber, balance: round2(a.balance),
+      })),
     });
   } catch (err) { next(err); }
 });
 
-// ---------- TRANSACTIONS (location-scoped) ----------
+// Move money between two of your own cash/bank accounts (not income or expense).
+router.post('/transfers', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const companyId = req.user!.companyId;
+    const amount = parsePositiveAmount(req.body?.amount);
+    const from = await resolvePaymentAccount(prisma, companyId, { accountId: req.body?.fromAccountId });
+    const to = await resolvePaymentAccount(prisma, companyId, { accountId: req.body?.toAccountId });
+    if (from.id === to.id) throw badRequest('Choose two different accounts');
+    const date = parseDate(req.body?.date) ?? new Date();
+    const entry = await prisma.$transaction((tx) =>
+      postJournal(tx, {
+        companyId,
+        description: req.body?.notes ? `Transfer: ${String(req.body.notes).slice(0, 120)}` : `Transfer from ${from.name} to ${to.name}`,
+        sourceType: 'transfer',
+        reference: req.body?.reference || null,
+        date,
+        createdById: req.user!.id,
+        lines: [
+          { accountId: to.id, debit: amount },
+          { accountId: from.id, credit: amount },
+        ],
+      })
+    );
+    res.status(201).json({ success: true, data: entry });
+  } catch (err) { next(err); }
+});
+
+// =====================================================================
+// JOURNAL
+// =====================================================================
+
+router.get('/journal', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const companyId = req.user!.companyId;
+    const { from, to } = periodFromQuery(req);
+    const page = Math.max(1, parseInt(String(req.query.page || '1')) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(String(req.query.pageSize || '50')) || 50));
+    const where: any = { companyId };
+    if (from || to) where.date = { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) };
+    if (typeof req.query.sourceType === 'string' && req.query.sourceType) where.sourceType = req.query.sourceType;
+    if (typeof req.query.accountId === 'string' && req.query.accountId) where.lines = { some: { accountId: req.query.accountId } };
+    if (typeof req.query.search === 'string' && req.query.search.trim()) {
+      const q = req.query.search.trim();
+      where.OR = [
+        { description: { contains: q, mode: 'insensitive' } },
+        { reference: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+    const [total, entries] = await Promise.all([
+      prisma.journalEntry.count({ where }),
+      prisma.journalEntry.findMany({
+        where,
+        orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          location: { select: { name: true } },
+          lines: { include: { account: { select: { id: true, name: true, code: true, type: true } } } },
+        },
+      }),
+    ]);
+    res.json({
+      success: true,
+      data: {
+        total,
+        page,
+        pageSize,
+        entries: entries.map((e) => ({
+          ...e,
+          lines: e.lines.map((l) => ({ ...l, debit: Number(l.debit), credit: Number(l.credit) })),
+        })),
+      },
+    });
+  } catch (err) { next(err); }
+});
+
+// Manual journal entry (owner capital, drawings, loans, corrections...).
+// Receivables, payables and inventory are excluded: they must always match
+// invoices, purchases and stock, so they change only through those screens.
+router.post('/journal', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    requireAdmin(req);
+    const companyId = req.user!.companyId;
+    const description = typeof req.body?.description === 'string' ? req.body.description.trim().slice(0, 200) : '';
+    if (!description) throw badRequest('Description is required');
+    const raw = Array.isArray(req.body?.lines) ? req.body.lines : [];
+    const lines = raw
+      .map((l: any) => ({
+        accountId: String(l?.accountId || ''),
+        debit: round2(Number(l?.debit) || 0),
+        credit: round2(Number(l?.credit) || 0),
+        memo: l?.memo ? String(l.memo).slice(0, 200) : null,
+      }))
+      .filter((l: any) => l.accountId && (l.debit || l.credit));
+    if (lines.length < 2) throw badRequest('A journal entry needs at least two lines');
+    for (const l of lines) {
+      if (l.debit < 0 || l.credit < 0) throw badRequest('Amounts must be positive');
+      if (l.debit && l.credit) throw badRequest('Each line is either a debit or a credit, not both');
+    }
+    const totalDebit = round2(lines.reduce((s: number, l: any) => s + l.debit, 0));
+    const totalCredit = round2(lines.reduce((s: number, l: any) => s + l.credit, 0));
+    if (Math.abs(totalDebit - totalCredit) > 0.005) {
+      throw badRequest(`Debits (${totalDebit.toFixed(2)}) must equal credits (${totalCredit.toFixed(2)})`);
+    }
+    const accounts = await prisma.account.findMany({
+      where: { companyId, id: { in: lines.map((l: any) => l.accountId) } },
+    });
+    const byId = new Map(accounts.map((a) => [a.id, a]));
+    for (const l of lines) {
+      const a = byId.get(l.accountId);
+      if (!a) throw notFound('Account not found');
+      if (!a.isActive) throw badRequest(`"${a.name}" is inactive`);
+      if (a.systemKey && DOCUMENT_CONTROLLED.has(a.systemKey)) {
+        throw badRequest(`"${a.name}" changes only through invoices, purchases and stock, not manual entries`);
+      }
+    }
+    const entry = await prisma.$transaction((tx) =>
+      postJournal(tx, {
+        companyId,
+        description,
+        sourceType: 'manual',
+        reference: req.body?.reference || null,
+        date: parseDate(req.body?.date) ?? new Date(),
+        createdById: req.user!.id,
+        lines,
+      })
+    );
+    res.status(201).json({ success: true, data: entry });
+  } catch (err) { next(err); }
+});
+
+// Self-check: every entry balances and cached balances match the journal.
+router.get('/ledger-check', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ success: true, data: await verifyLedger(prisma, req.user!.companyId) });
+  } catch (err) { next(err); }
+});
+
+// Records from before the double-entry ledger (read-only history).
 router.get('/transactions', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { type, from, to } = req.query;
-    const where: any = { companyId: req.user?.companyId, ...locationWhere(req) };
+    const { type } = req.query;
+    const { from, to } = periodFromQuery(req);
+    const where: any = { companyId: req.user!.companyId, ...locationWhere(req) };
     if (type) where.type = type;
-    if (from || to) {
-      where.date = {};
-      if (from) where.date.gte = new Date(String(from));
-      if (to) where.date.lte = new Date(String(to));
-    }
-
+    if (from || to) where.date = { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) };
     const transactions = await prisma.transaction.findMany({
       where,
       orderBy: { date: 'desc' },
@@ -81,67 +352,120 @@ router.get('/transactions', resolveLocation, async (req: Request, res: Response,
   } catch (err) { next(err); }
 });
 
-// ---------- EXPENSES (location-scoped) ----------
-router.get('/expenses', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
+// =====================================================================
+// EXPENSES
+// =====================================================================
+
+router.get('/expense-categories', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const expenses = await prisma.transaction.findMany({
-      where: { companyId: req.user?.companyId, type: 'expense', ...locationWhere(req) },
-      orderBy: { date: 'desc' },
-      include: { account: { select: { name: true } } },
+    const companyId = req.user!.companyId;
+    for (const key of ['rent', 'utilities', 'salaries', 'general_expense'] as const) {
+      await systemAccount(prisma, companyId, key);
+    }
+    const cats = await prisma.account.findMany({
+      where: { companyId, type: 'expense', isActive: true, systemKey: { notIn: ['cogs', 'inventory_loss'] } },
+      orderBy: [{ code: 'asc' }, { name: 'asc' }],
     });
-    res.json({ success: true, data: expenses });
+    res.json({ success: true, data: cats.map((a) => ({ id: a.id, name: a.name, code: a.code })) });
   } catch (err) { next(err); }
 });
 
+// Expenses: journal entries since the ledger started, plus older records.
+router.get('/expenses', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const companyId = req.user!.companyId;
+    const company = await prisma.company.findUnique({ where: { id: companyId }, select: { ledgerStartedAt: true } });
+    const entries = await prisma.journalEntry.findMany({
+      where: { companyId, sourceType: 'expense', ...locationWhere(req) },
+      orderBy: { date: 'desc' },
+      take: 1000,
+      include: { lines: { include: { account: { select: { name: true, type: true, subtype: true } } } } },
+    });
+    const fromLedger = entries.map((e) => {
+      const exp = e.lines.find((l) => l.account.type === 'expense');
+      const paid = e.lines.find((l) => l.account.type === 'asset');
+      return {
+        id: e.id,
+        date: e.date,
+        description: e.description,
+        reference: e.reference,
+        amount: Number(exp?.debit ?? 0),
+        account: { name: exp?.account.name ?? '—' },
+        paidFrom: paid?.account.name ?? null,
+        legacy: false,
+      };
+    });
+    const legacyRows = await prisma.transaction.findMany({
+      where: {
+        companyId,
+        type: 'expense',
+        ...locationWhere(req),
+        account: { systemKey: { not: 'inventory_loss' } },
+        ...(company?.ledgerStartedAt ? { date: { lt: company.ledgerStartedAt } } : {}),
+      },
+      orderBy: { date: 'desc' },
+      include: { account: { select: { name: true } } },
+    });
+    const legacy = legacyRows.map((t) => ({
+      id: t.id, date: t.date, description: t.description, reference: null,
+      amount: t.amount, account: { name: t.account.name }, paidFrom: 'Cash', legacy: true,
+    }));
+    const all = [...fromLedger, ...legacy].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    res.json({ success: true, data: all });
+  } catch (err) { next(err); }
+});
+
+// Record an expense: Dr expense category / Cr cash or bank account.
 router.post('/expenses', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const companyId = req.user?.companyId!;
-    const { category, description, date } = req.body;
+    const companyId = req.user!.companyId;
+    const { category, categoryId, description, date, reference } = req.body;
     const amount = parsePositiveAmount(req.body?.amount);
 
-    const categoryName =
-      typeof category === 'string' && category.trim() ? category.trim().slice(0, 80) : 'General Expense';
-    // A category may be new, but it must never resolve to a non-expense
-    // account (e.g. a category named "Cash" would otherwise post to Cash).
-    const existingCategory = await prisma.account.findFirst({ where: { companyId, name: categoryName } });
-    if (existingCategory && existingCategory.type !== 'expense') {
-      throw badRequest(`"${categoryName}" is not an expense category`);
+    let account;
+    if (categoryId) {
+      account = await prisma.account.findFirst({ where: { id: categoryId, companyId } });
+      if (!account) throw notFound('Expense category not found');
+    } else {
+      const name = typeof category === 'string' && category.trim() ? category.trim().slice(0, 80) : '';
+      account = name
+        ? await prisma.account.findFirst({ where: { companyId, name: { equals: name, mode: 'insensitive' } } })
+        : await systemAccount(prisma, companyId, 'general_expense');
+      if (!account && name) {
+        account = await prisma.account.create({ data: { companyId, name, type: 'expense', balance: 0 } });
+      }
     }
-    const account = existingCategory || (await findOrCreateAccount(companyId, categoryName, 'expense'));
-    const cash = await resolvePaymentAccount(prisma, companyId, {
+    if (!account || account.type !== 'expense' || account.systemKey === 'cogs' || account.systemKey === 'inventory_loss') {
+      throw badRequest(`"${account?.name ?? category}" is not an expense category`);
+    }
+    const payFrom = await resolvePaymentAccount(prisma, companyId, {
       accountId: req.body?.accountId,
       account: req.body?.account,
     });
     const locationId = requireTargetLocation(req);
 
-    const result = await prisma.$transaction(async (tx) => {
-      const expense = await tx.transaction.create({
-        data: {
-          companyId,
-          locationId,
-          accountId: account.id,
-          type: 'expense',
-          description: description || category,
-          amount,
-          date: date ? new Date(date) : new Date(),
-        },
-      });
-
-      await tx.account.update({
-        where: { id: account.id },
-        data: { balance: { increment: amount } },
-      });
-      await tx.account.update({
-        where: { id: cash.id },
-        data: { balance: { decrement: amount } },
-      });
-
-      return expense;
-    });
-
-    res.status(201).json({ success: true, data: result });
+    const entry = await prisma.$transaction((tx) =>
+      postJournal(tx, {
+        companyId,
+        locationId,
+        description: (description && String(description).trim()) || account!.name,
+        sourceType: 'expense',
+        reference: reference || null,
+        date: parseDate(date) ?? new Date(),
+        createdById: req.user!.id,
+        lines: [
+          { accountId: account!.id, debit: amount },
+          { accountId: payFrom.id, credit: amount },
+        ],
+      })
+    );
+    res.status(201).json({ success: true, data: entry });
   } catch (err) { next(err); }
 });
+
+// =====================================================================
+// RECEIVABLES & PAYABLES
+// =====================================================================
 
 // ---------- RECEIVABLE (location-scoped) ----------
 router.get('/receivable', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
@@ -189,68 +513,129 @@ router.get('/receivable', resolveLocation, async (req: Request, res: Response, n
   } catch (err) { next(err); }
 });
 
-// ---------- PROFIT & LOSS (location-scoped) ----------
-router.get('/profit-loss', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
+
+router.get('/payable', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const companyId = req.user?.companyId!;
-    const { from, to } = req.query;
-
-    const dateFilter: any = {};
-    if (from) dateFilter.gte = new Date(String(from));
-    if (to) dateFilter.lte = new Date(String(to));
-
-    const where: any = { companyId, ...locationWhere(req) };
-    if (from || to) where.date = dateFilter;
-
-    // Revenue from sale transactions
-    const revenueAgg = await prisma.transaction.aggregate({
-      where: { ...where, type: 'sale' },
-      _sum: { amount: true },
+    const companyId = req.user!.companyId;
+    const purchases = await prisma.purchase.findMany({
+      where: { companyId, ...locationWhere(req) },
+      include: { supplier: { select: { name: true } } },
+      orderBy: { date: 'asc' },
     });
-    const revenue = revenueAgg._sum.amount || 0;
-
-    // COGS
-    const cogsAgg = await prisma.transaction.aggregate({
-      where: { ...where, type: 'cogs' },
-      _sum: { amount: true },
-    });
-    const cogs = cogsAgg._sum.amount || 0;
-
-    const grossProfit = revenue - cogs;
-    const grossMargin = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
-
-    // Operating expenses by account
-    const opexByAccount = await prisma.transaction.groupBy({
-      by: ['accountId'],
-      where: { ...where, type: 'expense' },
-      _sum: { amount: true },
-    });
-
-    const accounts = await prisma.account.findMany({ where: { companyId } });
-    const accountMap = new Map(accounts.map((a) => [a.id, a]));
-
-    const expenseBreakdown = opexByAccount.map((e) => ({
-      account: accountMap.get(e.accountId)?.name || 'Unknown',
-      amount: e._sum.amount || 0,
-    }));
-
-    const totalOpex = expenseBreakdown.reduce((s, e) => s + e.amount, 0);
-    const netProfit = grossProfit - totalOpex;
-    const netMargin = revenue > 0 ? (netProfit / revenue) * 100 : 0;
-
+    const now = new Date();
+    const buckets = { current: 0, days30: 0, days60: 0, days90: 0 };
+    const rows = purchases
+      .map((p) => ({ p, balance: purchaseBalance(p) }))
+      .filter(({ balance }) => balance > 0.009)
+      .map(({ p, balance }) => {
+        const due = p.dueDate ? new Date(p.dueDate) : new Date(p.date);
+        const days = Math.floor((now.getTime() - due.getTime()) / 86400000);
+        const bucket = days > 60 ? 'days90' : days > 30 ? 'days60' : days > 0 ? 'days30' : 'current';
+        (buckets as any)[bucket] += balance;
+        return {
+          id: p.id,
+          reference: p.reference,
+          supplier: p.supplier?.name ?? '—',
+          date: p.date,
+          dueDate: p.dueDate,
+          total: p.total,
+          amountPaid: p.amountPaid,
+          returnedAmount: p.returnedAmount,
+          balance,
+          daysOverdue: Math.max(0, days),
+          bucket,
+        };
+      });
+    const total = round2(rows.reduce((s, r) => s + r.balance, 0));
     res.json({
       success: true,
       data: {
-        revenue,
-        cogs,
-        grossProfit,
-        grossMargin,
-        totalOpex,
-        totalExpenses: totalOpex,
-        netProfit,
-        netMargin,
-        margin: netMargin,
-        expenseBreakdown,
+        summary: {
+          total,
+          current: round2(buckets.current),
+          days30: round2(buckets.days30),
+          days60: round2(buckets.days60),
+          days90: round2(buckets.days90),
+        },
+        rows,
+      },
+    });
+  } catch (err) { next(err); }
+});
+
+// =====================================================================
+// FINANCIAL STATEMENTS
+// =====================================================================
+
+router.get('/profit-loss', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { from, to } = periodFromQuery(req);
+    const data = await profitAndLoss(req.user!.companyId, { from, to, locationIds: await reportLocationIds(req) });
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+});
+
+router.get('/profit-loss/monthly', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const months = Math.min(Math.max(parseInt(String(req.query.months || '12')) || 12, 1), 24);
+    const data = await monthlyPnl(req.user!.companyId, months, await reportLocationIds(req));
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+});
+
+router.get('/balance-sheet', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const asOf = parseDate(req.query.asOf, true) ?? new Date();
+    res.json({ success: true, data: await balanceSheet(req.user!.companyId, asOf) });
+  } catch (err) { next(err); }
+});
+
+router.get('/trial-balance', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const asOf = parseDate(req.query.asOf, true) ?? new Date();
+    res.json({ success: true, data: await trialBalance(req.user!.companyId, asOf) });
+  } catch (err) { next(err); }
+});
+
+router.get('/cash-flow', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { from, to } = periodFromQuery(req);
+    res.json({ success: true, data: await cashFlow(req.user!.companyId, { from, to }) });
+  } catch (err) { next(err); }
+});
+
+// One call for the Accounting overview page.
+router.get('/overview', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const companyId = req.user!.companyId;
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const yearStart = new Date(now.getFullYear(), 0, 1);
+    const locationIds = await reportLocationIds(req);
+    const [cash, month, ytd, invoices, purchases, company] = await Promise.all([
+      listPaymentAccounts(prisma, companyId),
+      profitAndLoss(companyId, { from: monthStart, to: now, locationIds }),
+      profitAndLoss(companyId, { from: yearStart, to: now, locationIds }),
+      prisma.invoice.findMany({
+        where: { companyId, status: { in: ['unpaid', 'partially_paid', 'overdue'] }, ...locationWhere(req) },
+        select: { total: true, amountPaid: true },
+      }),
+      prisma.purchase.findMany({
+        where: { companyId, ...locationWhere(req) },
+        select: { total: true, amountPaid: true, returnedAmount: true },
+      }),
+      prisma.company.findUnique({ where: { id: companyId }, select: { ledgerStartedAt: true } }),
+    ]);
+    res.json({
+      success: true,
+      data: {
+        ledgerStartedAt: company?.ledgerStartedAt ?? null,
+        cashAccounts: cash.map((a: any) => ({ id: a.id, name: a.name, subtype: a.subtype, bankName: a.bankName, balance: round2(a.balance) })),
+        totalCash: round2(cash.reduce((s: number, a: any) => s + a.balance, 0)),
+        receivables: round2(invoices.reduce((s, i) => s + (i.total - i.amountPaid), 0)),
+        payables: round2(purchases.reduce((s, p) => s + Math.max(0, purchaseBalance(p)), 0)),
+        thisMonth: month,
+        yearToDate: ytd,
       },
     });
   } catch (err) { next(err); }

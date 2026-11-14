@@ -2,6 +2,9 @@ import { Router } from 'express';
 import { authenticate } from '../../middleware/auth';
 
 import { prisma } from '../../lib/prisma';
+import { badRequest } from '../../lib/errors';
+import { resolvePaymentAccount } from '../../lib/accounts';
+import { postJournal, systemAccount } from '../../lib/ledger';
 const router = Router();
 
 router.use(authenticate);
@@ -25,6 +28,10 @@ router.post('/run', async (req, res, next) => {
     const { period, deductionRate = 0 } = req.body; // period = "2026-03"
 
     if (!period) return res.status(400).json({ success: false, message: 'Period required' });
+    const rate = Number(deductionRate);
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+      return res.status(400).json({ success: false, message: 'Deduction rate must be between 0 and 100' });
+    }
 
     const employees = await prisma.employee.findMany({ where: { companyId } });
     if (employees.length === 0) {
@@ -43,8 +50,8 @@ router.post('/run', async (req, res, next) => {
       if (processed.has(emp.id)) continue;
 
       const gross = emp.salary;
-      const deductions = gross * (deductionRate / 100);
-      const net = gross - deductions;
+      const deductions = Math.round(gross * (rate / 100) * 100) / 100;
+      const net = Math.round((gross - deductions) * 100) / 100;
 
       const payroll = await prisma.payroll.create({
         data: {
@@ -74,42 +81,40 @@ router.post('/:id/pay', async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Already paid' });
     }
 
+    const payFrom = await resolvePaymentAccount(prisma, companyId, {
+      accountId: req.body?.accountId,
+      account: req.body?.account,
+    });
+    const employee = await prisma.employee.findFirst({
+      where: { id: payroll.employeeId, companyId },
+      select: { firstName: true, lastName: true },
+    });
+
     await prisma.$transaction(async (tx) => {
-      await tx.payroll.update({
-        where: { id: payroll.id },
+      // Claim it first so a double click cannot pay twice.
+      const claimed = await tx.payroll.updateMany({
+        where: { id: payroll.id, status: { not: 'paid' } },
         data: { status: 'paid', paidAt: new Date() },
       });
+      if (claimed.count === 0) throw badRequest('Already paid');
 
-      const salaryAccount = await tx.account.findFirst({
-        where: { companyId, name: 'Salary Expense' },
-      }) || await tx.account.create({
-        data: { companyId, name: 'Salary Expense', type: 'expense', balance: 0 },
-      });
-
-      const cashAccount = await tx.account.findFirst({
-        where: { companyId, name: 'Cash' },
-      }) || await tx.account.create({
-        data: { companyId, name: 'Cash', type: 'asset', balance: 0 },
-      });
-
-      await tx.transaction.create({
-        data: {
-          companyId,
-          accountId: salaryAccount.id,
-          type: 'payroll',
-          description: `Payroll ${payroll.period}`,
-          amount: payroll.net,
-          date: new Date(),
-        },
-      });
-
-      await tx.account.update({
-        where: { id: salaryAccount.id },
-        data: { balance: { increment: payroll.net } },
-      });
-      await tx.account.update({
-        where: { id: cashAccount.id },
-        data: { balance: { decrement: payroll.net } },
+      // Dr Salary Expense (gross) / Cr Cash-or-Bank (net) / Cr Payroll Deductions Payable (withheld)
+      const salaries = await systemAccount(tx, companyId, 'salaries');
+      const deductionsPayable = await systemAccount(tx, companyId, 'payroll_liabilities');
+      const deductions = Math.max(0, Math.round((payroll.gross - payroll.net) * 100) / 100);
+      await postJournal(tx, {
+        companyId,
+        locationId: payroll.locationId,
+        description: `Payroll ${payroll.period}${employee ? ` — ${employee.firstName} ${employee.lastName}` : ''}`,
+        sourceType: 'payroll',
+        sourceId: payroll.id,
+        reference: payroll.period,
+        createdById: req.user!.id,
+        lines: [
+          { accountId: salaries.id, debit: payroll.gross },
+          { accountId: payFrom.id, credit: payroll.net },
+          { accountId: deductionsPayable.id, credit: deductions },
+        ],
       });
     });
 

@@ -27,7 +27,9 @@ router.get('/:id/summary', async (req: Request, res: Response, next: NextFunctio
     const totalSales = invoices
       .filter((i) => i.status !== 'draft' && i.status !== 'cancelled')
       .reduce((s: number, i) => s + i.total, 0);
-    const totalPaid = invoices.reduce((s: number, i) => s + i.amountPaid, 0);
+    const totalPaid = invoices
+      .filter((i) => i.status !== 'draft' && i.status !== 'cancelled')
+      .reduce((s: number, i) => s + i.amountPaid, 0);
     const outstanding = totalSales - totalPaid;
 
     const payments = invoices

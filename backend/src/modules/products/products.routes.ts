@@ -4,7 +4,7 @@ import { resolveLocation, requireTargetLocation } from '../../middleware/locatio
 import { CrudService, pick } from '../../services/crud.service';
 import { prisma } from '../../lib/prisma';
 import { badRequest } from '../../lib/errors';
-import { addStock, postInventoryIncrease, syncProductTotals, stockByProduct } from '../../lib/inventory';
+import { addStock, postOpeningStock, syncProductTotals, stockByProduct } from '../../lib/inventory';
 
 const router = Router();
 const productService = new CrudService('product');
@@ -98,8 +98,8 @@ router.post('/', resolveLocation, async (req: Request, res: Response, next: Next
           type: 'opening',
           reference: 'Opening stock',
         });
-        await postInventoryIncrease(tx, {
-          companyId, locationId, amount: totalCost, description: `Opening stock: ${created.name}`,
+        await postOpeningStock(tx, {
+          companyId, locationId, amount: totalCost, description: `Opening stock: ${created.name}`, sourceId: created.id,
         });
         await syncProductTotals(tx, companyId, [created.id]);
       }

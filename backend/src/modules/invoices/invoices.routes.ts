@@ -5,8 +5,9 @@ import { resolveLocation, locationWhere, guardRecordLocation, requireTargetLocat
 import { prisma } from '../../lib/prisma';
 import { badRequest, notFound } from '../../lib/errors';
 import {
-  findOrCreateAccount, resolvePaymentAccount, parsePositiveAmount, parsePositiveQuantity,
+  resolvePaymentAccount, parsePositiveAmount, parsePositiveQuantity,
 } from '../../lib/accounts';
+import { postJournal, systemAccount } from '../../lib/ledger';
 import { addStock, consumeFifo, restoreToBatch, syncProductTotals } from '../../lib/inventory';
 const router = Router();
 
@@ -273,39 +274,26 @@ router.post('/:id/finalize', async (req: Request, res: Response, next: NextFunct
       }
       await syncProductTotals(tx, companyId, productIds);
 
-      // Revenue + receivable
-      const salesAccount = await findOrCreateAccount(tx, companyId, 'Sales Revenue', 'revenue');
-      const arAccount = await findOrCreateAccount(tx, companyId, 'Accounts Receivable', 'asset');
-      await tx.transaction.create({
-        data: {
-          companyId,
-          locationId: invoice.locationId,
-          accountId: salesAccount.id,
-          type: 'sale',
-          description: `Invoice ${invoice.invoiceNumber}`,
-          amount: invoice.total,
-        },
+      // Dr Accounts Receivable / Cr Sales Revenue, and Dr COGS / Cr Inventory
+      const ar = await systemAccount(tx, companyId, 'ar');
+      const sales = await systemAccount(tx, companyId, 'sales');
+      const cogs = await systemAccount(tx, companyId, 'cogs');
+      const inventory = await systemAccount(tx, companyId, 'inventory');
+      await postJournal(tx, {
+        companyId,
+        locationId: invoice.locationId,
+        description: `Invoice ${invoice.invoiceNumber}`,
+        sourceType: 'invoice',
+        sourceId: invoice.id,
+        reference: invoice.invoiceNumber,
+        createdById: req.user!.id,
+        lines: [
+          { accountId: ar.id, debit: invoice.total },
+          { accountId: sales.id, credit: invoice.total },
+          { accountId: cogs.id, debit: totalCogs },
+          { accountId: inventory.id, credit: totalCogs },
+        ],
       });
-      await tx.account.update({ where: { id: salesAccount.id }, data: { balance: { increment: invoice.total } } });
-      await tx.account.update({ where: { id: arAccount.id }, data: { balance: { increment: invoice.total } } });
-
-      // Cost of goods sold
-      if (totalCogs > 0) {
-        const cogsAccount = await findOrCreateAccount(tx, companyId, 'Cost of Goods Sold', 'expense');
-        const inventoryAccount = await findOrCreateAccount(tx, companyId, 'Inventory', 'asset');
-        await tx.transaction.create({
-          data: {
-            companyId,
-            locationId: invoice.locationId,
-            accountId: cogsAccount.id,
-            type: 'cogs',
-            description: `COGS for ${invoice.invoiceNumber}`,
-            amount: totalCogs,
-          },
-        });
-        await tx.account.update({ where: { id: cogsAccount.id }, data: { balance: { increment: totalCogs } } });
-        await tx.account.update({ where: { id: inventoryAccount.id }, data: { balance: { decrement: totalCogs } } });
-      }
     });
 
     res.json({ success: true });
@@ -365,27 +353,20 @@ router.post('/:id/payment', async (req: Request, res: Response, next: NextFuncti
         data: { amountPaid: newPaid, status: newStatus },
       });
 
-      const cashAccount = receiveAccount;
-      const arAccount = await findOrCreateAccount(tx, companyId, 'Accounts Receivable', 'asset');
-
-      await tx.transaction.create({
-        data: {
-          companyId,
-          locationId: invoice.locationId,
-          accountId: cashAccount.id,
-          type: 'payment',
-          description: `Payment for ${invoice.invoiceNumber}`,
-          amount,
-          date: new Date(),
-        },
-      });
-      await tx.account.update({
-        where: { id: cashAccount.id },
-        data: { balance: { increment: amount } },
-      });
-      await tx.account.update({
-        where: { id: arAccount.id },
-        data: { balance: { decrement: amount } },
+      // Dr Cash-or-Bank / Cr Accounts Receivable
+      const ar = await systemAccount(tx, companyId, 'ar');
+      await postJournal(tx, {
+        companyId,
+        locationId: invoice.locationId,
+        description: `Payment for ${invoice.invoiceNumber}`,
+        sourceType: 'invoice_payment',
+        sourceId: invoice.id,
+        reference: reference || invoice.invoiceNumber,
+        createdById: req.user!.id,
+        lines: [
+          { accountId: receiveAccount.id, debit: amount },
+          { accountId: ar.id, credit: amount },
+        ],
       });
     });
 
@@ -459,44 +440,33 @@ router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunctio
       }
       await syncProductTotals(tx, companyId, productIds);
 
-      // 2. Reverse revenue (negative 'sale') and the receivable still owed
-      const salesAccount = await findOrCreateAccount(tx, companyId, 'Sales Revenue', 'revenue');
-      const arAccount = await findOrCreateAccount(tx, companyId, 'Accounts Receivable', 'asset');
+      // 2. One reversing entry:
+      //    Dr Sales Revenue (total) + Dr Inventory (cost restored)
+      //    Cr Accounts Receivable (still owed) + Cr Cash/Bank (refund) + Cr COGS (cost)
       const outstanding = Math.max(0, Math.round((invoice.total - invoice.amountPaid) * 100) / 100);
-      await tx.transaction.create({
-        data: {
-          companyId,
-          locationId: invoice.locationId,
-          accountId: salesAccount.id,
-          type: 'sale',
-          description: `Cancellation of ${invoice.invoiceNumber}`,
-          amount: -invoice.total,
-        },
+      const refundNow = paid > 0 && refundAccount ? paid : 0;
+      const ar = await systemAccount(tx, companyId, 'ar');
+      const sales = await systemAccount(tx, companyId, 'sales');
+      const cogs = await systemAccount(tx, companyId, 'cogs');
+      const inventory = await systemAccount(tx, companyId, 'inventory');
+      await postJournal(tx, {
+        companyId,
+        locationId: invoice.locationId,
+        description: `Cancellation of ${invoice.invoiceNumber}`,
+        sourceType: 'invoice_cancel',
+        sourceId: invoice.id,
+        reference: invoice.invoiceNumber,
+        createdById: req.user!.id,
+        lines: [
+          { accountId: sales.id, debit: invoice.total },
+          { accountId: inventory.id, debit: cogsReversed },
+          { accountId: ar.id, credit: outstanding },
+          ...(refundNow > 0 ? [{ accountId: refundAccount.id, credit: refundNow }] : []),
+          { accountId: cogs.id, credit: cogsReversed },
+        ],
       });
-      await tx.account.update({ where: { id: salesAccount.id }, data: { balance: { decrement: invoice.total } } });
-      if (outstanding > 0) {
-        await tx.account.update({ where: { id: arAccount.id }, data: { balance: { decrement: outstanding } } });
-      }
 
-      // 3. Reverse cost of goods sold (negative 'cogs')
-      if (cogsReversed > 0) {
-        const cogsAccount = await findOrCreateAccount(tx, companyId, 'Cost of Goods Sold', 'expense');
-        const inventoryAccount = await findOrCreateAccount(tx, companyId, 'Inventory', 'asset');
-        await tx.transaction.create({
-          data: {
-            companyId,
-            locationId: invoice.locationId,
-            accountId: cogsAccount.id,
-            type: 'cogs',
-            description: `COGS reversal for ${invoice.invoiceNumber}`,
-            amount: -cogsReversed,
-          },
-        });
-        await tx.account.update({ where: { id: cogsAccount.id }, data: { balance: { decrement: cogsReversed } } });
-        await tx.account.update({ where: { id: inventoryAccount.id }, data: { balance: { increment: cogsReversed } } });
-      }
-
-      // 4. Refund money already received
+      // 3. Record the refund in the invoice payment history
       if (paid > 0 && refundAccount) {
         await tx.payment.create({
           data: {
@@ -507,17 +477,6 @@ router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunctio
             method: 'refund',
             reference: req.body?.reference || null,
             notes: `Refund on cancellation (${refundAccount.name})`,
-          },
-        });
-        await tx.account.update({ where: { id: refundAccount.id }, data: { balance: { decrement: paid } } });
-        await tx.transaction.create({
-          data: {
-            companyId,
-            locationId: invoice.locationId,
-            accountId: refundAccount.id,
-            type: 'refund',
-            description: `Refund for cancelled ${invoice.invoiceNumber}`,
-            amount: -paid,
           },
         });
         await tx.invoice.update({ where: { id: invoice.id }, data: { amountPaid: 0 } });

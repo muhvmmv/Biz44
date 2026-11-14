@@ -3,7 +3,8 @@ import { authenticate } from '../../middleware/auth';
 import { resolveLocation, locationWhere, guardRecordLocation } from '../../middleware/locationAuth';
 
 import { prisma } from '../../lib/prisma';
-import { findOrCreateAccount, resolvePaymentAccount, parsePositiveAmount } from '../../lib/accounts';
+import { resolvePaymentAccount, parsePositiveAmount } from '../../lib/accounts';
+import { postJournal, systemAccount } from '../../lib/ledger';
 import { purchaseBalance, purchaseStatus, returnToSupplier } from './purchase.service';
 const router = Router();
 
@@ -200,40 +201,20 @@ router.post('/:id/pay', resolveLocation, async (req: Request, res: Response, nex
         data: { amountPaid: newPaid, status: newStatus },
       });
 
-      // 3. Accounting: AP down, Cash down
-      const apAccount = await findOrCreateAccount(tx, companyId, 'Accounts Payable', 'liability');
-      const cashAccount = payFromAccount;
-
-      await tx.transaction.create({
-        data: {
-          companyId,
-          locationId: purchase.locationId,
-          accountId: apAccount.id,
-          type: 'payment',
-          description: `Supplier payment${purchase.reference ? ` ${purchase.reference}` : ''}`,
-          amount: -payAmount,
-          date: new Date(),
-        },
-      });
-      await tx.account.update({
-        where: { id: apAccount.id },
-        data: { balance: { decrement: payAmount } },
-      });
-
-      await tx.transaction.create({
-        data: {
-          companyId,
-          locationId: purchase.locationId,
-          accountId: cashAccount.id,
-          type: 'payment',
-          description: `Supplier payment${purchase.reference ? ` ${purchase.reference}` : ''}`,
-          amount: payAmount,
-          date: new Date(),
-        },
-      });
-      await tx.account.update({
-        where: { id: cashAccount.id },
-        data: { balance: { decrement: payAmount } },
+      // 3. Accounting: Dr Accounts Payable / Cr Cash-or-Bank
+      const ap = await systemAccount(tx, companyId, 'ap');
+      await postJournal(tx, {
+        companyId,
+        locationId: purchase.locationId,
+        description: `Supplier payment${purchase.reference ? ` ${purchase.reference}` : ''}`,
+        sourceType: 'purchase_payment',
+        sourceId: purchase.id,
+        reference: reference || purchase.reference,
+        createdById: req.user!.id,
+        lines: [
+          { accountId: ap.id, debit: payAmount },
+          { accountId: payFromAccount.id, credit: payAmount },
+        ],
       });
 
       return payment;
@@ -259,6 +240,7 @@ router.post('/:id/return', async (req: Request, res: Response, next: NextFunctio
     if (!batchId) return res.status(400).json({ success: false, message: 'Choose which delivery line to return' });
     const result = await returnToSupplier({
       companyId: req.user!.companyId,
+      userId: req.user!.id,
       purchaseId: req.params.id,
       batchId,
       quantity,

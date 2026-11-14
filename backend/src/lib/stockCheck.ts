@@ -36,7 +36,7 @@ export async function runStockCheck(companyId: string) {
       orderBy: { name: 'asc' },
     }),
     prisma.location.findFirst({ where: { companyId, isDefault: true }, select: { id: true, name: true } }),
-    prisma.account.findFirst({ where: { companyId, name: 'Inventory' }, select: { balance: true } }),
+    prisma.account.findFirst({ where: { companyId, systemKey: 'inventory' }, select: { balance: true } }),
   ]);
 
   const totals = await stockByProduct(prisma, companyId, null);

@@ -1,44 +1,32 @@
 import { badRequest } from './errors';
+import { systemAccount } from './ledger';
 
 type Tx = any; // Prisma client or interactive-transaction client
 
-/**
- * Asset accounts that are NOT places money is held. Everything else of
- * type "asset" (Cash, Bank Account, Bank Account 2, ...) is a valid account
- * to receive money into or pay money out of.
- */
-const NON_CASH_ASSETS = new Set(['Accounts Receivable', 'Inventory']);
-
-export function isCashOrBankAccount(account: { type: string; name: string }) {
-  return account.type === 'asset' && !NON_CASH_ASSETS.has(account.name);
+/** Accounts that hold money: Cash and bank accounts (subtype cash | bank). */
+export function isCashOrBankAccount(account: { type: string; subtype?: string | null; isActive?: boolean }) {
+  return (
+    account.type === 'asset' &&
+    (account.subtype === 'cash' || account.subtype === 'bank') &&
+    account.isActive !== false
+  );
 }
 
-/**
- * Find a system account by its fixed name, creating it if it is missing.
- * Only call this with names hard-coded in the backend, never with user input.
- */
-export async function findOrCreateAccount(tx: Tx, companyId: string, name: string, type: string) {
-  const existing = await tx.account.findFirst({ where: { companyId, name } });
-  if (existing) return existing;
-  return tx.account.create({ data: { companyId, name, type, balance: 0 } });
-}
-
-/** All accounts a payment can be made from or received into. */
+/** All active accounts a payment can be made from or received into. */
 export async function listPaymentAccounts(tx: Tx, companyId: string) {
   // Make sure the standard Cash account always exists.
-  await findOrCreateAccount(tx, companyId, 'Cash', 'asset');
-  const assets = await tx.account.findMany({
-    where: { companyId, type: 'asset' },
-    orderBy: { name: 'asc' },
+  await systemAccount(tx, companyId, 'cash');
+  return tx.account.findMany({
+    where: { companyId, type: 'asset', subtype: { in: ['cash', 'bank'] }, isActive: true },
+    orderBy: [{ code: 'asc' }, { name: 'asc' }],
   });
-  return assets.filter(isCashOrBankAccount);
 }
 
 /**
  * Resolve the cash/bank account for a payment from request input.
  * Accepts an account ID (preferred) or an existing account's exact name
  * (kept for older clients). Never creates accounts from user input.
- * Defaults to "Cash" when nothing is given.
+ * Defaults to the system Cash account when nothing is given.
  */
 export async function resolvePaymentAccount(
   tx: Tx,
@@ -54,7 +42,7 @@ export async function resolvePaymentAccount(
   } else if (accountName) {
     account = await tx.account.findFirst({ where: { name: accountName, companyId } });
   } else {
-    account = await findOrCreateAccount(tx, companyId, 'Cash', 'asset');
+    account = await systemAccount(tx, companyId, 'cash');
   }
 
   if (!account || !isCashOrBankAccount(account)) {

@@ -8,53 +8,58 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  firstName String
-  lastName  String
-  email     String   @unique
-  password  String
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-  role      String   @default("admin")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String               @id @default(uuid())
+  firstName      String
+  lastName       String
+  email          String               @unique
+  password       String
+  companyId      String
+  company        Company              @relation(fields: [companyId], references: [id])
+  role           String               @default("admin")
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
   locationAccess UserLocationAccess[]
 
   @@map("users")
 }
 
 model Company {
-  id             String          @id @default(uuid())
-  name           String
-  email          String?
-  phone          String?
-  address        String?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  users          User[]
-  purchases Purchase[]
-  customers      Customer[]
-  suppliers      Supplier[]
-  employees      Employee[]
-  products       Product[]
-  invoices       Invoice[]
-  accounts       Account[]
-  transactions   Transaction[]
-  stockMovements StockMovement[]
-  payments       Payment[]
-  payrolls       Payroll[]
-  attendance     Attendance[]
-  reportNotes ReportNote[]
-  leaves         Leave[]
-  batches InventoryBatch[]
-  locations Location[]
-  purchasePayments PurchasePayment[]
+  id                  String            @id @default(uuid())
+  name                String
+  email               String?
+  phone               String?
+  address             String?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  users               User[]
+  purchases           Purchase[]
+  customers           Customer[]
+  suppliers           Supplier[]
+  employees           Employee[]
+  products            Product[]
+  invoices            Invoice[]
+  accounts            Account[]
+  transactions        Transaction[]
+  stockMovements      StockMovement[]
+  payments            Payment[]
+  payrolls            Payroll[]
+  attendance          Attendance[]
+  reportNotes         ReportNote[]
+  leaves              Leave[]
+  batches             InventoryBatch[]
+  locations           Location[]
+  purchasePayments    PurchasePayment[]
+  journalEntries      JournalEntry[]
+  /// When this company switched to the double-entry journal. Account balances
+  /// at that moment were carried in as an opening entry; P&L history before
+  /// it comes from the older transaction records.
+  ledgerStartedAt     DateTime?
   businessType        String?
   industry            String?
   country             String?
-  currency            String   @default("USD")
+  currency            String            @default("USD")
   teamSize            String?
-  onboardingCompleted Boolean  @default(false)
+  onboardingCompleted Boolean           @default(false)
 }
 
 model Customer {
@@ -74,17 +79,17 @@ model Customer {
 }
 
 model Supplier {
-  id        String   @id @default(uuid())
+  id        String           @id @default(uuid())
   companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
+  company   Company          @relation(fields: [companyId], references: [id])
   purchases Purchase[]
-  batches InventoryBatch[]
+  batches   InventoryBatch[]
   name      String
   email     String?
   phone     String?
   address   String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
 
   @@map("suppliers")
 }
@@ -110,51 +115,51 @@ model Employee {
 }
 
 model Product {
-  id             String          @id @default(uuid())
+  id             String           @id @default(uuid())
   companyId      String
-  company        Company         @relation(fields: [companyId], references: [id])
+  company        Company          @relation(fields: [companyId], references: [id])
   name           String
   sku            String?
   description    String?
-  price          Float           @default(0)
-  cost           Float           @default(0)
-  totalCostValue Float           @default(0)
-  quantity       Int             @default(0)
-  reorderPoint   Int             @default(0)
+  price          Float            @default(0)
+  cost           Float            @default(0)
+  totalCostValue Float            @default(0)
+  quantity       Int              @default(0)
+  reorderPoint   Int              @default(0)
   invoiceItems   InvoiceItem[]
   stockMovements StockMovement[]
   purchaseItems  PurchaseItem[]
   batches        InventoryBatch[]
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   @@map("products")
 }
 
 model Purchase {
-  id         String            @id @default(uuid())
-  companyId  String
-  company    Company           @relation(fields: [companyId], references: [id])
-  locationId String?
-  location   Location?         @relation(fields: [locationId], references: [id])
-  supplierId String?
-  supplier   Supplier?         @relation(fields: [supplierId], references: [id])
-  reference  String?
-  date       DateTime          @default(now())
-  dueDate    DateTime?
-  subtotal   Float             @default(0)
-  total      Float             @default(0)
-  amountPaid Float             @default(0)
+  id             String            @id @default(uuid())
+  companyId      String
+  company        Company           @relation(fields: [companyId], references: [id])
+  locationId     String?
+  location       Location?         @relation(fields: [locationId], references: [id])
+  supplierId     String?
+  supplier       Supplier?         @relation(fields: [supplierId], references: [id])
+  reference      String?
+  date           DateTime          @default(now())
+  dueDate        DateTime?
+  subtotal       Float             @default(0)
+  total          Float             @default(0)
+  amountPaid     Float             @default(0)
   /// Value of goods returned to the supplier and deducted from this purchase.
   /// Amount owed = total - amountPaid - returnedAmount.
-  returnedAmount Float         @default(0)
-  status     String            @default("unpaid")
-  notes      String?
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
-  items      PurchaseItem[]
-  batches    InventoryBatch[]
-  payments   PurchasePayment[]
+  returnedAmount Float             @default(0)
+  status         String            @default("unpaid")
+  notes          String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  items          PurchaseItem[]
+  batches        InventoryBatch[]
+  payments       PurchasePayment[]
 
   @@index([companyId, status])
   @@index([companyId, locationId])
@@ -175,33 +180,33 @@ model PurchaseItem {
 }
 
 model Invoice {
-  id            String    @id @default(uuid())
-  companyId     String
-  company       Company   @relation(fields: [companyId], references: [id])
-  locationId String?
-  location   Location? @relation(fields: [locationId], references: [id])
-  customerId    String?
-  customer      Customer? @relation(fields: [customerId], references: [id])
+  id              String        @id @default(uuid())
+  companyId       String
+  company         Company       @relation(fields: [companyId], references: [id])
+  locationId      String?
+  location        Location?     @relation(fields: [locationId], references: [id])
+  customerId      String?
+  customer        Customer?     @relation(fields: [customerId], references: [id])
   customerName    String?
   customerAddress String?
   customerEmail   String?
   customerPhone   String?
   /// Unique within a company (each company numbers its own invoices INV-0001, INV-0002, ...).
-  invoiceNumber String
-  status        String    @default("draft")
-  subtotal      Float     @default(0)
-  discountTotal Float     @default(0)
-  taxTotal      Float     @default(0)
-  total         Float     @default(0)
-  amountPaid    Float     @default(0)
-  notes         String?
-  dueDate       DateTime?
-  finalizedAt   DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  items         InvoiceItem[]
-  payments      Payment[]
- 
+  invoiceNumber   String
+  status          String        @default("draft")
+  subtotal        Float         @default(0)
+  discountTotal   Float         @default(0)
+  taxTotal        Float         @default(0)
+  total           Float         @default(0)
+  amountPaid      Float         @default(0)
+  notes           String?
+  dueDate         DateTime?
+  finalizedAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  items           InvoiceItem[]
+  payments        Payment[]
+
   @@unique([companyId, invoiceNumber])
   @@index([companyId, locationId])
   @@map("invoices")
@@ -222,90 +227,143 @@ model InvoiceItem {
 }
 
 model Payment {
-  id        String   @id @default(uuid())
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
+  id         String    @id @default(uuid())
+  companyId  String
+  company    Company   @relation(fields: [companyId], references: [id])
   locationId String?
   location   Location? @relation(fields: [locationId], references: [id])
-  invoiceId String?
-  invoice   Invoice? @relation(fields: [invoiceId], references: [id])
-  amount    Float
-  method    String   @default("cash")
-  reference String?
-  notes     String?
-  paidAt    DateTime @default(now())
-  createdAt DateTime @default(now())
- 
+  invoiceId  String?
+  invoice    Invoice?  @relation(fields: [invoiceId], references: [id])
+  amount     Float
+  method     String    @default("cash")
+  reference  String?
+  notes      String?
+  paidAt     DateTime  @default(now())
+  createdAt  DateTime  @default(now())
 
-  @@map("payments")
   @@index([companyId, locationId])
+  @@map("payments")
 }
 
 model Account {
-  id           String        @id @default(uuid())
-  companyId    String
-  company      Company       @relation(fields: [companyId], references: [id])
-  name         String
-  type         String
-  balance      Float         @default(0)
-  transactions Transaction[]
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id            String        @id @default(uuid())
+  companyId     String
+  company       Company       @relation(fields: [companyId], references: [id])
+  name          String
+  /// asset | liability | equity | revenue | expense
+  type          String
+  /// Cached balance in the account's normal direction (debit for assets and
+  /// expenses, credit for liabilities, equity and revenue). Kept in step with
+  /// the journal by the ledger service.
+  balance       Float         @default(0)
+  /// Fixed role used by the system to find this account regardless of its
+  /// name (cash, ar, inventory, ap, sales, cogs, ...). Null for user accounts.
+  systemKey     String?
+  /// Chart-of-accounts code, e.g. 1000.
+  code          String?
+  /// For asset accounts that hold money: "cash" or "bank".
+  subtype       String?
+  bankName      String?
+  accountNumber String?
+  isActive      Boolean       @default(true)
+  transactions  Transaction[]
+  journalLines  JournalLine[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
+  @@unique([companyId, systemKey])
   @@map("accounts")
 }
 
-model Transaction {
-  id          String   @id @default(uuid())
+/// One balanced accounting event. Sum of debits = sum of credits.
+model JournalEntry {
+  id          String        @id @default(uuid())
   companyId   String
-  company     Company  @relation(fields: [companyId], references: [id])
-  locationId String?
-  location   Location? @relation(fields: [locationId], references: [id])
+  company     Company       @relation(fields: [companyId], references: [id])
+  locationId  String?
+  location    Location?     @relation(fields: [locationId], references: [id])
+  date        DateTime      @default(now())
+  description String
+  /// What created it: opening_balance, invoice, invoice_payment, invoice_cancel,
+  /// purchase, purchase_payment, supplier_return, opening_stock, stock_adjustment,
+  /// expense, payroll, transfer, manual
+  sourceType  String
+  sourceId    String?
+  reference   String?
+  createdById String?
+  createdAt   DateTime      @default(now())
+  lines       JournalLine[]
+
+  @@index([companyId, date])
+  @@index([companyId, sourceType, sourceId])
+  @@map("journal_entries")
+}
+
+model JournalLine {
+  id        String       @id @default(uuid())
+  entryId   String
+  entry     JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  companyId String
+  accountId String
+  account   Account      @relation(fields: [accountId], references: [id])
+  debit     Decimal      @default(0) @db.Decimal(18, 2)
+  credit    Decimal      @default(0) @db.Decimal(18, 2)
+  memo      String?
+
+  @@index([companyId, accountId])
+  @@index([entryId])
+  @@map("journal_lines")
+}
+
+model Transaction {
+  id          String    @id @default(uuid())
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id])
+  locationId  String?
+  location    Location? @relation(fields: [locationId], references: [id])
   accountId   String
-  account     Account  @relation(fields: [accountId], references: [id])
+  account     Account   @relation(fields: [accountId], references: [id])
   type        String
   description String?
   amount      Float
-  date        DateTime @default(now())
-  createdAt   DateTime @default(now())
-  
+  date        DateTime  @default(now())
+  createdAt   DateTime  @default(now())
 
-  @@map("transactions")
   @@index([companyId, locationId])
+  @@map("transactions")
 }
 
 model StockMovement {
-  id         String   @id @default(uuid())
+  id         String          @id @default(uuid())
   companyId  String
-  company    Company  @relation(fields: [companyId], references: [id])
+  company    Company         @relation(fields: [companyId], references: [id])
   locationId String?
-  location   Location? @relation(fields: [locationId], references: [id])
+  location   Location?       @relation(fields: [locationId], references: [id])
   productId  String
-  product    Product  @relation(fields: [productId], references: [id])
+  product    Product         @relation(fields: [productId], references: [id])
   batchId    String?
   batch      InventoryBatch? @relation(fields: [batchId], references: [id])
   type       String
   quantity   Int
   balance    Int
-  unitCost   Float    @default(0)
-  totalCost  Float    @default(0)
+  unitCost   Float           @default(0)
+  totalCost  Float           @default(0)
   reference  String?
   notes      String?
-  createdAt  DateTime @default(now())
-  
+  createdAt  DateTime        @default(now())
 
   @@index([productId, createdAt])
   @@index([reference])
-  @@map("stock_movements")
   @@index([companyId, locationId])
+  @@map("stock_movements")
 }
 
 model InventoryBatch {
   id                   String          @id @default(uuid())
   companyId            String
   company              Company         @relation(fields: [companyId], references: [id])
-  locationId String?
-  location   Location? @relation(fields: [locationId], references: [id])
+  locationId           String?
+  location             Location?       @relation(fields: [locationId], references: [id])
   productId            String
   product              Product         @relation(fields: [productId], references: [id])
   supplierId           String?
@@ -322,7 +380,6 @@ model InventoryBatch {
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
   stockMovements       StockMovement[]
-  
 
   @@index([productId, receivedAt])
   @@index([productId, quantityRemaining])
@@ -399,30 +456,32 @@ model ReportNote {
 
   @@map("report_notes")
 }
+
 model Location {
-  id         String   @id @default(uuid())
-  companyId  String
-  company    Company  @relation(fields: [companyId], references: [id])
-  name       String
-  city       String?
-  address    String?
-  phone      String?
-  email      String?
-  status     String   @default("active") // active | inactive
-  isDefault  Boolean  @default(false)    // set true for the auto-created "Main" location
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  userAccess      UserLocationAccess[]
-  invoices        Invoice[]
-  payments        Payment[]
-  transactions    Transaction[]
-  stockMovements  StockMovement[]
-  purchases       Purchase[]
-  batches         InventoryBatch[]
-  attendance      Attendance[]
-  leaves          Leave[]
-  payrolls        Payroll[]
+  id               String               @id @default(uuid())
+  companyId        String
+  company          Company              @relation(fields: [companyId], references: [id])
+  name             String
+  city             String?
+  address          String?
+  phone            String?
+  email            String?
+  status           String               @default("active") // active | inactive
+  isDefault        Boolean              @default(false) // set true for the auto-created "Main" location
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  userAccess       UserLocationAccess[]
+  invoices         Invoice[]
+  payments         Payment[]
+  transactions     Transaction[]
+  stockMovements   StockMovement[]
+  purchases        Purchase[]
+  batches          InventoryBatch[]
+  attendance       Attendance[]
+  leaves           Leave[]
+  payrolls         Payroll[]
   purchasePayments PurchasePayment[]
+  journalEntries   JournalEntry[]
 
   @@index([companyId, status])
   @@map("locations")

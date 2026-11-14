@@ -116,3 +116,18 @@ export function requireTargetLocation(req: Request): string {
   if (req.allowedLocationIds?.length === 1) return req.allowedLocationIds[0];
   throw new AppError(400, 'Select a specific location (not "All locations") before making this change');
 }
+
+
+/**
+ * Locations a report should cover: the selected one, or undefined (the whole
+ * company, including entries with no location) when the user can see every
+ * location. Users limited to some locations only see those.
+ */
+export async function reportLocationIds(req: Request): Promise<string[] | undefined> {
+  const total = await prisma.location.count({ where: { companyId: req.user!.companyId } });
+  // One location: everything belongs to it, including company-wide entries
+  // (owner money, transfers, payroll) that carry no location.
+  if (total <= 1) return undefined;
+  if (req.locationId) return [req.locationId];
+  return req.allowedLocationIds.length >= total ? undefined : req.allowedLocationIds;
+}

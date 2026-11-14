@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { env } from '../../config/env';
+import { DEFAULT_ACCOUNT_KEYS, SYSTEM_ACCOUNTS } from '../../lib/ledger';
 
 import { prisma } from '../../lib/prisma';
 
@@ -36,21 +37,22 @@ export class AuthService {
           create: {
             name: companyName,
             currency: 'USD',
+            // New companies start on the double-entry ledger with no opening balances.
+            ledgerStartedAt: new Date(),
             accounts: {
               create: [
-                { name: 'Cash', type: 'asset', balance: 0 },
-                { name: 'Bank Account', type: 'asset', balance: 0 },
-                { name: 'Accounts Receivable', type: 'asset', balance: 0 },
-                { name: 'Inventory', type: 'asset', balance: 0 },
-                { name: 'Accounts Payable', type: 'liability', balance: 0 },
-                { name: 'Sales Revenue', type: 'revenue', balance: 0 },
-                { name: 'Cost of Goods Sold', type: 'expense', balance: 0 },
-                { name: 'Operating Expenses', type: 'expense', balance: 0 },
-                { name: 'Inventory Loss', type: 'expense', balance: 0 },
-                { name: 'Rent Expense', type: 'expense', balance: 0 },
-                { name: 'Utilities Expense', type: 'expense', balance: 0 },
-                { name: 'Salary Expense', type: 'expense', balance: 0 },
-                { name: 'General Expense', type: 'expense', balance: 0 },
+                ...DEFAULT_ACCOUNT_KEYS.map((key) => {
+                  const def = SYSTEM_ACCOUNTS[key];
+                  return {
+                    name: def.name,
+                    type: def.type,
+                    code: def.code,
+                    subtype: (def as any).subtype ?? null,
+                    systemKey: key,
+                    balance: 0,
+                  };
+                }),
+                { name: 'Bank Account', type: 'asset', subtype: 'bank', code: '1010', balance: 0 },
               ],
             },
           },

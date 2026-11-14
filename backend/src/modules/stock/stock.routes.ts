@@ -3,9 +3,8 @@ import { authenticate } from '../../middleware/auth';
 import { resolveLocation, locationWhere, requireTargetLocation } from '../../middleware/locationAuth';
 import { prisma } from '../../lib/prisma';
 import { badRequest, notFound } from '../../lib/errors';
-import {
-  findOrCreateAccount, resolvePaymentAccount, parsePositiveAmount, parsePositiveQuantity,
-} from '../../lib/accounts';
+import { resolvePaymentAccount, parsePositiveAmount, parsePositiveQuantity } from '../../lib/accounts';
+import { postJournal, systemAccount } from '../../lib/ledger';
 import {
   addStock, consumeFifo, stockAt, averageCost, syncProductTotals, postInventoryLoss,
 } from '../../lib/inventory';
@@ -218,56 +217,23 @@ router.post('/receive', resolveLocation, async (req: Request, res: Response, nex
       }
       await syncProductTotals(tx, companyId, productIds);
 
-      const inventoryAccount = await findOrCreateAccount(tx, companyId, 'Inventory', 'asset');
-      await tx.account.update({
-        where: { id: inventoryAccount.id },
-        data: { balance: { increment: totalCost } },
+      // Dr Inventory (full cost) / Cr Cash-or-Bank (paid now) / Cr Accounts Payable (owed)
+      const inventory = await systemAccount(tx, companyId, 'inventory');
+      const ap = await systemAccount(tx, companyId, 'ap');
+      await postJournal(tx, {
+        companyId,
+        locationId,
+        description: `Goods received${reference ? ` ${reference}` : ''}`,
+        sourceType: 'purchase',
+        sourceId: purchase.id,
+        reference,
+        createdById: req.user!.id,
+        lines: [
+          { accountId: inventory.id, debit: totalCost },
+          ...(paidAmount > 0 && payFromAccount ? [{ accountId: payFromAccount.id, credit: paidAmount }] : []),
+          ...(outstanding > 0 ? [{ accountId: ap.id, credit: outstanding }] : []),
+        ],
       });
-      await tx.transaction.create({
-        data: {
-          companyId,
-          locationId,
-          accountId: inventoryAccount.id,
-          type: 'inventory',
-          description: `Inventory receipt${reference ? ` ${reference}` : ''}`,
-          amount: totalCost,
-        },
-      });
-
-      if (paidAmount > 0 && payFromAccount) {
-        await tx.account.update({
-          where: { id: payFromAccount.id },
-          data: { balance: { decrement: paidAmount } },
-        });
-        await tx.transaction.create({
-          data: {
-            companyId,
-            locationId,
-            accountId: payFromAccount.id,
-            type: 'payment',
-            description: `Paid for inventory${reference ? ` ${reference}` : ''}`,
-            amount: paidAmount,
-          },
-        });
-      }
-
-      if (outstanding > 0) {
-        const apAccount = await findOrCreateAccount(tx, companyId, 'Accounts Payable', 'liability');
-        await tx.account.update({
-          where: { id: apAccount.id },
-          data: { balance: { increment: outstanding } },
-        });
-        await tx.transaction.create({
-          data: {
-            companyId,
-            locationId,
-            accountId: apAccount.id,
-            type: 'purchase',
-            description: `Inventory owed${reference ? ` ${reference}` : ''}`,
-            amount: outstanding,
-          },
-        });
-      }
 
       return purchase;
     });
@@ -292,7 +258,8 @@ router.post('/damage', resolveLocation, async (req: Request, res: Response, next
         type: 'damage', reference: reason || 'Damage/Write-off', notes,
       });
       await postInventoryLoss(tx, {
-        companyId, locationId, amount: totalCost,
+        companyId, locationId, amount: totalCost, sourceType: 'stock_writeoff', sourceId: product.id,
+        reference: reason || 'Write-off',
         description: `Write-off: ${quantity} × ${product.name}${reason ? ` (${reason})` : ''}`,
       });
       await syncProductTotals(tx, companyId, [product.id]);
@@ -346,6 +313,7 @@ async function applyStockChange(
     if (valueChange !== 0) {
       await postInventoryLoss(tx, {
         companyId, locationId, amount: -valueChange,
+        sourceType: type === 'count' ? 'stock_count' : 'stock_adjustment', sourceId: product.id,
         description: `${type === 'count' ? 'Stock count' : 'Stock adjustment'}: ${delta > 0 ? '+' : ''}${delta} × ${product.name}`,
       });
     }

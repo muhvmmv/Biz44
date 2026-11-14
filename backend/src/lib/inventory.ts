@@ -13,11 +13,11 @@
  * stock changes with accounting entries atomically.
  */
 import { badRequest, AppError } from './errors';
-import { findOrCreateAccount } from './accounts';
+import { postJournal, systemAccount, round2 } from './ledger';
 
 type Tx = any;
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+
 
 /** Batch filter for one product at a location (null = all locations). */
 function batchWhere(companyId: string, productId: string, locationId: string | null) {
@@ -311,50 +311,59 @@ export async function averageCost(
 }
 
 /**
- * Post a change in inventory value that is a loss (positive amount) or a
- * gain (negative amount): write-offs, count differences, adjustments.
- * Inventory moves by -amount; "Inventory Loss" (an operating expense) moves
- * by +amount, so gains reduce the period's losses.
+ * Book a change in inventory value as a loss (positive amount) or a gain
+ * (negative amount): write-offs, count differences, adjustments.
+ *   loss: Dr Inventory Loss / Cr Inventory
+ *   gain: Dr Inventory / Cr Inventory Loss (gains reduce the period's losses)
  */
 export async function postInventoryLoss(
   tx: Tx,
-  args: { companyId: string; locationId: string | null; amount: number; description: string }
+  args: {
+    companyId: string;
+    locationId: string | null;
+    amount: number;
+    description: string;
+    sourceType?: string;
+    sourceId?: string | null;
+    reference?: string | null;
+  }
 ) {
   const amount = round2(args.amount);
   if (amount === 0) return;
-  const inventory = await findOrCreateAccount(tx, args.companyId, 'Inventory', 'asset');
-  const loss = await findOrCreateAccount(tx, args.companyId, 'Inventory Loss', 'expense');
-  await tx.account.update({ where: { id: inventory.id }, data: { balance: { decrement: amount } } });
-  await tx.account.update({ where: { id: loss.id }, data: { balance: { increment: amount } } });
-  await tx.transaction.create({
-    data: {
-      companyId: args.companyId,
-      locationId: args.locationId,
-      accountId: loss.id,
-      type: 'expense',
-      description: args.description,
-      amount,
-    },
+  const inventory = await systemAccount(tx, args.companyId, 'inventory');
+  const loss = await systemAccount(tx, args.companyId, 'inventory_loss');
+  await postJournal(tx, {
+    companyId: args.companyId,
+    locationId: args.locationId,
+    description: args.description,
+    sourceType: args.sourceType ?? 'stock_adjustment',
+    sourceId: args.sourceId,
+    reference: args.reference,
+    lines: [
+      { accountId: loss.id, debit: amount },
+      { accountId: inventory.id, credit: amount },
+    ],
   });
 }
 
-/** Increase the Inventory asset (stock added at a cost, e.g. opening stock). */
-export async function postInventoryIncrease(
+/** Opening stock brought in at cost: Dr Inventory / Cr Opening Balance Equity. */
+export async function postOpeningStock(
   tx: Tx,
-  args: { companyId: string; locationId: string | null; amount: number; description: string }
+  args: { companyId: string; locationId: string | null; amount: number; description: string; sourceId?: string | null }
 ) {
   const amount = round2(args.amount);
   if (amount <= 0) return;
-  const inventory = await findOrCreateAccount(tx, args.companyId, 'Inventory', 'asset');
-  await tx.account.update({ where: { id: inventory.id }, data: { balance: { increment: amount } } });
-  await tx.transaction.create({
-    data: {
-      companyId: args.companyId,
-      locationId: args.locationId,
-      accountId: inventory.id,
-      type: 'inventory',
-      description: args.description,
-      amount,
-    },
+  const inventory = await systemAccount(tx, args.companyId, 'inventory');
+  const equity = await systemAccount(tx, args.companyId, 'opening_equity');
+  await postJournal(tx, {
+    companyId: args.companyId,
+    locationId: args.locationId,
+    description: args.description,
+    sourceType: 'opening_stock',
+    sourceId: args.sourceId,
+    lines: [
+      { accountId: inventory.id, debit: amount },
+      { accountId: equity.id, credit: amount },
+    ],
   });
 }
