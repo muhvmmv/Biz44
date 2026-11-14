@@ -18,18 +18,12 @@ interface Expense {
   amount: number;
   date: string;
   account: { name: string };
+  paidFrom: string | null;
+  legacy?: boolean;
 }
 
-const categories = [
-  "Rent Expense",
-  "Utilities Expense",
-  "Salary Expense",
-  "Transportation",
-  "Marketing",
-  "Software",
-  "Insurance",
-  "General Expense",
-];
+interface Category { id: string; name: string }
+const NEW_CATEGORY = "__new__";
 
 export default function ExpensesPage() {
   const { format } = useCurrency();
@@ -43,6 +37,17 @@ export default function ExpensesPage() {
     date: new Date().toISOString().split("T")[0],
   });
   const [accountId, setAccountId] = useState("");
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [newCategory, setNewCategory] = useState("");
+
+  useEffect(() => {
+    apiFetch<{ success: boolean; data: Category[] }>("/accounting/expense-categories")
+      .then((r) => {
+        setCategories(r.data);
+        setForm((f) => (f.category === "General Expense" || !f.category ? { ...f, category: r.data[0]?.id ?? "" } : f));
+      })
+      .catch(console.error);
+  }, []);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -70,6 +75,10 @@ export default function ExpensesPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    if (form.category === NEW_CATEGORY && !newCategory.trim()) {
+      setError("Enter a name for the new category");
+      return;
+    }
     if (form.amount <= 0) {
       setError("Amount must be greater than 0");
       return;
@@ -78,11 +87,18 @@ export default function ExpensesPage() {
     try {
       await apiFetch("/accounting/expenses", {
         method: "POST",
-        body: JSON.stringify({ ...form, accountId }),
+        body: JSON.stringify({
+          amount: form.amount,
+          description: form.description,
+          date: form.date,
+          accountId,
+          ...(form.category === NEW_CATEGORY ? { category: newCategory.trim() } : { categoryId: form.category }),
+        }),
       });
       setShowForm(false);
+      setNewCategory("");
       setForm({
-        category: "General Expense",
+        category: categories[0]?.id ?? "",
         amount: 0,
         description: "",
         date: new Date().toISOString().split("T")[0],
@@ -145,6 +161,7 @@ export default function ExpensesPage() {
                     <th className="px-6 py-3 font-medium">Date</th>
                     <th className="px-6 py-3 font-medium">Category</th>
                     <th className="px-6 py-3 font-medium">Description</th>
+                    <th className="px-6 py-3 font-medium">Paid from</th>
                     <th className="px-6 py-3 font-medium text-right">Amount</th>
                   </tr>
                 </thead>
@@ -155,11 +172,13 @@ export default function ExpensesPage() {
                         {new Date(e.date).toLocaleDateString()}
                       </td>
                       <td className="px-6 py-3">
-                        <Badge variant="danger">{e.account.name}</Badge>
+                        <Badge variant="default">{e.account.name}</Badge>
                       </td>
                       <td className="px-6 py-3 text-ink-soft">
                         {e.description || "—"}
+                        {e.legacy && <span className="ml-2 text-xs text-ink-soft">(older record)</span>}
                       </td>
+                      <td className="px-6 py-3 text-ink-soft">{e.paidFrom || "—"}</td>
                       <td className="px-6 py-3 text-right font-medium text-danger">
                         -{format(e.amount)}
                       </td>
@@ -189,11 +208,20 @@ export default function ExpensesPage() {
                   className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
                 >
                   {categories.map((c) => (
-                    <option key={c} value={c}>
-                      {c.replace(" Expense", "")}
+                    <option key={c.id} value={c.id}>
+                      {c.name}
                     </option>
                   ))}
+                  <option value={NEW_CATEGORY}>+ New category…</option>
                 </select>
+                {form.category === NEW_CATEGORY && (
+                  <input
+                    value={newCategory}
+                    onChange={(e) => setNewCategory(e.target.value)}
+                    placeholder="e.g. Diesel & generator"
+                    className="mt-2 w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
+                  />
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1 text-charcoal">

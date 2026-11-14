@@ -1,0 +1,18 @@
+/** Plain-language names for what created a journal entry. */
+export const SOURCE_LABELS: Record<string, string> = {
+  opening_balance: "Opening balances",
+  invoice: "Sale (invoice)",
+  invoice_payment: "Customer payment",
+  invoice_cancel: "Invoice cancelled",
+  purchase: "Goods received",
+  purchase_payment: "Supplier payment",
+  supplier_return: "Return to supplier",
+  opening_stock: "Opening stock",
+  stock_adjustment: "Stock adjustment",
+  stock_count: "Stock count",
+  stock_writeoff: "Stock write-off",
+  expense: "Expense",
+  payroll: "Payroll",
+  transfer: "Transfer",
+  manual: "Manual entry",
+};

@@ -52,11 +52,13 @@ const navigation: NavItem[] = [
     icon: Calculator,
     children: [
       { name: "Overview", href: "/dashboard/accounting" },
-      { name: "Transactions", href: "/dashboard/accounting/transactions" },
-      { name: "Expenses", href: "/dashboard/accounting/expenses" },
-      { name: "Accounts Receivable", href: "/dashboard/accounting/receivable" },
       { name: "Cash & Banks", href: "/dashboard/accounting/accounts" },
+      { name: "Expenses", href: "/dashboard/accounting/expenses" },
+      { name: "Journal", href: "/dashboard/accounting/journal" },
       { name: "Profit & Loss", href: "/dashboard/accounting/profit-loss" },
+      { name: "Balance Sheet", href: "/dashboard/accounting/balance-sheet" },
+      { name: "Receivables", href: "/dashboard/accounting/receivable" },
+      { name: "Payables", href: "/dashboard/accounting/payable" },
     ],
   },
   { name: "Reports", href: "/dashboard/reports", icon: FileText },
@@ -75,8 +77,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
 function DashboardInner({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [expanded, setExpanded] = useState<string | null>("Inventory");
   const pathname = usePathname();
+  // Open the group that contains the current page.
+  const [expanded, setExpanded] = useState<string | null>(
+    () =>
+      navigation.find((n) =>
+        n.children?.some((c) => pathname === c.href || pathname.startsWith(`${c.href}/`))
+      )?.name ?? null
+  );
   const { user, logout } = useAuth();
   const { loading: locationLoading } = useLocation();
 
@@ -128,7 +136,12 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
 
             if (item.children) {
               const isExpanded = expanded === item.name;
-              const isChildActive = item.children.some((c) => pathname === c.href);
+              // The most specific child whose path matches (so /accounting/accounts/123
+              // highlights "Cash & Banks", not "Overview").
+              const activeChild = item.children
+                .filter((c) => pathname === c.href || pathname.startsWith(`${c.href}/`))
+                .sort((a, b) => b.href.length - a.href.length)[0];
+              const isChildActive = !!activeChild;
 
               return (
                 <div key={item.name}>
@@ -148,7 +161,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
                   {isExpanded && (
                     <div className="mt-1 ml-4 pl-4 border-l border-white/10 space-y-1">
                       {item.children.map((child) => {
-                        const isActive = pathname === child.href;
+                        const isActive = activeChild?.href === child.href;
                         return (
                           <Link
                             key={child.name}

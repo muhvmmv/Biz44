@@ -1,117 +1,144 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Wallet, Landmark, ArrowDownLeft, ArrowUpRight, ChevronRight } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import PageHeader from "@/components/ui/PageHeader";
 import Skeleton from "@/components/ui/Skeleton";
-import { Card, CardContent } from "@/components/ui/Card";
-import { Wallet, Landmark, TrendingUp, Package, CreditCard } from "lucide-react";
+import StatCard from "@/components/ui/StatCard";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { useCurrency } from "@/hooks/useCurrency";
+import { useLocationVersion } from "@/hooks/useLocationRefetch";
 
-interface Account {
-  id: string; name: string; type: string; balance: number;
+interface PL {
+  revenue: number;
+  cogs: number;
+  grossProfit: number;
+  grossMargin: number;
+  totalOpex: number;
+  netProfit: number;
+  netMargin: number;
+}
+interface Overview {
+  ledgerStartedAt: string | null;
+  cashAccounts: { id: string; name: string; subtype: string; bankName: string | null; balance: number }[];
+  totalCash: number;
+  receivables: number;
+  payables: number;
+  thisMonth: PL;
+  yearToDate: PL;
 }
 
-const iconFor = (name: string) => {
-  if (name.toLowerCase().includes("cash")) return Wallet;
-  if (name.toLowerCase().includes("bank")) return Landmark;
-  if (name.toLowerCase().includes("receivable")) return TrendingUp;
-  if (name.toLowerCase().includes("inventory")) return Package;
-  if (name.toLowerCase().includes("payable")) return CreditCard;
-  return Wallet;
-};
+const LINKS = [
+  { href: "/dashboard/accounting/accounts", label: "Cash & Banks", text: "Balances, transfers, statements" },
+  { href: "/dashboard/accounting/profit-loss", label: "Profit & Loss", text: "Revenue, costs and profit" },
+  { href: "/dashboard/accounting/balance-sheet", label: "Balance Sheet", text: "Assets, liabilities, equity" },
+  { href: "/dashboard/accounting/journal", label: "Journal", text: "Every double entry" },
+];
 
-export default function AccountsPage() {
+export default function AccountingOverviewPage() {
   const { format } = useCurrency();
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [loading, setLoading] = useState(true);
+  const version = useLocationVersion();
+  const [data, setData] = useState<Overview | null>(null);
 
   useEffect(() => {
     let active = true;
-    apiFetch<{ success: boolean; data: Account[] }>("/accounting/accounts")
-      .then((res) => { if (active) setAccounts(res.data); })
-      .catch(console.error)
-      .finally(() => { if (active) setLoading(false); });
+    apiFetch<{ success: boolean; data: Overview }>("/accounting/overview")
+      .then((r) => { if (active) setData(r.data); })
+      .catch(console.error);
     return () => { active = false; };
-  }, []);
-
-  const assetAccounts = accounts.filter((a) => a.type === "asset");
-  const liabilityAccounts = accounts.filter((a) => a.type === "liability");
-  const totalAssets = assetAccounts.reduce((s, a) => s + a.balance, 0);
-  const totalLiabilities = liabilityAccounts.reduce((s, a) => s + a.balance, 0);
+  }, [version]);
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Cash & Banks" description="Your financial account balances." />
+      <PageHeader title="Accounting" description="Where the money is, what's owed, and how the business is performing." />
 
-      {loading ? (
+      {!data ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-32" />)}
+          {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-28" />)}
         </div>
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Card><CardContent className="p-5">
-              <p className="text-sm text-ink-soft">Total Assets</p>
-              <p className="text-2xl font-bold mt-1 text-ink">{format(totalAssets)}</p>
-            </CardContent></Card>
-            <Card><CardContent className="p-5">
-              <p className="text-sm text-ink-soft">Total Liabilities</p>
-              <p className="text-2xl font-bold mt-1 text-ink">{format(totalLiabilities)}</p>
-            </CardContent></Card>
-            <Card><CardContent className="p-5">
-              <p className="text-sm text-ink-soft">Net Position</p>
-              <p className="text-2xl font-bold mt-1 text-ink">{format(totalAssets - totalLiabilities)}</p>
-            </CardContent></Card>
+            <StatCard label="Cash and bank" value={format(data.totalCash)} icon={<Landmark size={18} />} />
+            <Link href="/dashboard/accounting/receivable">
+              <StatCard label="Customers owe you" value={format(data.receivables)} icon={<ArrowDownLeft size={18} />} hint="Receivables" className="hover:shadow-md transition-shadow h-full" />
+            </Link>
+            <Link href="/dashboard/accounting/payable">
+              <StatCard label="You owe suppliers" value={format(data.payables)} icon={<ArrowUpRight size={18} />} hint="Payables" className="hover:shadow-md transition-shadow h-full" />
+            </Link>
           </div>
 
-          <div>
-            <h3 className="font-semibold text-charcoal mb-3">Assets</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {assetAccounts.map((a) => {
-                const Icon = iconFor(a.name);
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <PnlCard title="This month" pl={data.thisMonth} format={format} />
+            <PnlCard title="This year" pl={data.yearToDate} format={format} />
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Cash and bank accounts</CardTitle>
+              <Link href="/dashboard/accounting/accounts" className="text-sm font-medium text-brand-dark hover:underline">Manage</Link>
+            </CardHeader>
+            <CardContent className="divide-y divide-border-soft">
+              {data.cashAccounts.map((a) => {
+                const Icon = a.subtype === "bank" ? Landmark : Wallet;
                 return (
-                  <Card key={a.id}>
-                    <CardContent className="p-5 flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-brand-light text-brand-dark flex items-center justify-center">
-                        <Icon size={22} />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm text-ink-soft">{a.name}</p>
-                        <p className="text-xl font-bold text-ink">{format(a.balance)}</p>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  <Link key={a.id} href={`/dashboard/accounting/accounts/${a.id}`} className="flex items-center justify-between py-3 hover:text-brand-dark">
+                    <span className="flex items-center gap-3">
+                      <Icon size={16} className="text-brand" />
+                      <span>{a.name}{a.bankName ? <span className="text-ink-soft text-sm"> · {a.bankName}</span> : null}</span>
+                    </span>
+                    <span className={`tabular-nums font-medium ${a.balance < 0 ? "text-danger" : ""}`}>{format(a.balance)}</span>
+                  </Link>
                 );
               })}
-            </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {LINKS.map((l) => (
+              <Link key={l.href} href={l.href} className="rounded-2xl border border-border-soft bg-white p-5 hover:shadow-md transition-shadow">
+                <p className="font-semibold text-ink flex items-center justify-between">{l.label} <ChevronRight size={16} className="text-ink-soft" /></p>
+                <p className="text-sm text-ink-soft mt-1">{l.text}</p>
+              </Link>
+            ))}
           </div>
 
-          {liabilityAccounts.length > 0 && (
-            <div>
-              <h3 className="font-semibold text-charcoal mb-3">Liabilities</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {liabilityAccounts.map((a) => {
-                  const Icon = iconFor(a.name);
-                  return (
-                    <Card key={a.id}>
-                      <CardContent className="p-5 flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-[#F4E2E1] text-danger flex items-center justify-center">
-                          <Icon size={22} />
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-sm text-ink-soft">{a.name}</p>
-                          <p className="text-xl font-bold text-ink">{format(a.balance)}</p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            </div>
+          {data.ledgerStartedAt && (
+            <p className="text-xs text-ink-soft">
+              Double-entry ledger in use since {new Date(data.ledgerStartedAt).toLocaleDateString()}. Earlier profit and loss
+              comes from the records kept before then.
+            </p>
           )}
         </>
       )}
     </div>
+  );
+}
+
+function PnlCard({ title, pl, format }: { title: string; pl: PL; format: (n: number) => string }) {
+  const rows: [string, number, string?][] = [
+    ["Revenue", pl.revenue],
+    ["Cost of goods sold", -pl.cogs],
+    ["Gross profit", pl.grossProfit, `${pl.grossMargin.toFixed(1)}%`],
+    ["Operating expenses", -pl.totalOpex],
+  ];
+  return (
+    <Card>
+      <CardHeader><CardTitle>{title}</CardTitle></CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        {rows.map(([label, value, note]) => (
+          <div key={label} className="flex justify-between">
+            <span className="text-ink-soft">{label}{note ? <span className="ml-2 text-xs">{note}</span> : null}</span>
+            <span className="tabular-nums">{format(value)}</span>
+          </div>
+        ))}
+        <div className="flex justify-between border-t border-border-soft pt-2 font-semibold">
+          <span>Net profit <span className="ml-1 text-xs font-normal text-ink-soft">{pl.netMargin.toFixed(1)}%</span></span>
+          <span className={`tabular-nums ${pl.netProfit >= 0 ? "text-success" : "text-danger"}`}>{format(pl.netProfit)}</span>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

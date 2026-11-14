@@ -43,7 +43,7 @@ export default function TransactionsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Transactions" description="Every financial event in your business." />
+      <PageHeader title="Older records" description="Financial records kept before the double-entry ledger started. They are read-only; everything since is in the Journal." />
 
       <div className="flex gap-2 flex-wrap">
         {["", "sale", "payment", "expense", "payroll", "refund"].map((t) => (

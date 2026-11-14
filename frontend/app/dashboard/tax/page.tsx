@@ -27,7 +27,7 @@ export default function TaxPage() {
     return () => { active = false; };
   }, []);
 
-  const finalized = invoices.filter((i) => i.finalizedAt);
+  const finalized = invoices.filter((i) => i.finalizedAt && i.status !== "cancelled");
   const taxableSales = finalized.reduce((s, i) => s + i.total, 0);
   const taxCollected = taxableSales * (taxRate / 100);
 

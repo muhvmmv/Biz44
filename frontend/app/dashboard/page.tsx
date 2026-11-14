@@ -33,6 +33,10 @@ interface DashboardSummary {
   profitMargin: number;
   expenses: number;
   netCash: number;
+  totalCash: number;
+  cashIn: number;
+  cashOut: number;
+  cashAccounts: { id: string; name: string; subtype: string; balance: number }[];
   outstanding: number;
   overdueCount: number;
   unpaidCount: number;
@@ -105,7 +109,7 @@ export default function DashboardPage() {
     let active = true;
 
     Promise.all([
-      apiFetch<{ success: boolean; data: DashboardSummary }>("/dashboard/summary"),
+      apiFetch<{ success: boolean; data: DashboardSummary }>(`/dashboard/summary?months=${range}`),
       apiFetch<{ success: boolean; data: typeof chartData }>(
         `/dashboard/monthly-chart?months=${range}`
       ),
@@ -170,7 +174,7 @@ export default function DashboardPage() {
           {/* KPI CARDS */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <KpiCard
-              title="Revenue"
+              title={range === 1 ? "Revenue this month" : `Revenue · ${range} months`}
               value={format(summary.revenue)}
               change={`${summary.revenueChange >= 0 ? "+" : ""}${summary.revenueChange.toFixed(1)}% vs last month`}
               trend={summary.revenueChange >= 0 ? "up" : "down"}
@@ -206,6 +210,39 @@ export default function DashboardPage() {
               href="/dashboard/accounting/receivable"
             />
           </div>
+
+          {/* CASH POSITION */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Cash position</CardTitle>
+              <Link href="/dashboard/accounting/accounts" className="text-sm font-medium text-brand-dark hover:underline">
+                Cash &amp; Banks
+              </Link>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                <div className="col-span-2 rounded-xl bg-charcoal text-white p-4">
+                  <p className="text-xs text-white/70">Total cash &amp; bank</p>
+                  <p className="text-2xl font-bold tabular-nums mt-1">{format(summary.totalCash)}</p>
+                  <p className="text-xs text-white/70 mt-1">
+                    In {format(summary.cashIn)} · Out {format(summary.cashOut)}
+                  </p>
+                </div>
+                {summary.cashAccounts.map((a) => (
+                  <Link
+                    key={a.id}
+                    href={`/dashboard/accounting/accounts/${a.id}`}
+                    className="rounded-xl border border-border-soft p-4 hover:border-brand transition-colors"
+                  >
+                    <p className="text-xs text-ink-soft truncate">{a.name}</p>
+                    <p className={`text-lg font-semibold tabular-nums mt-1 ${a.balance < 0 ? "text-danger" : "text-ink"}`}>
+                      {format(a.balance)}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
 
           {/* CHARTS */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

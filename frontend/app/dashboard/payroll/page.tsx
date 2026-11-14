@@ -10,6 +10,8 @@ import { Card, CardContent } from "@/components/ui/Card";
 import NumericInput from "@/components/ui/NumericInput";
 import { Play, Check, Trash2, DollarSign } from "lucide-react";
 import { useCurrency } from "@/hooks/useCurrency";
+import Dialog from "@/components/ui/Dialog";
+import PaymentAccountSelect from "@/components/ui/PaymentAccountSelect";
 
 interface Payroll {
   id: string;
@@ -71,14 +73,31 @@ export default function PayrollPage() {
     }
   };
 
-  const markPaid = async (id: string) => {
-    if (!confirm("Mark this payroll as paid? Salary expense will be recorded."))
-      return;
+  const [paying, setPaying] = useState<Payroll | null>(null);
+  const [payAccountId, setPayAccountId] = useState("");
+  const [payBusy, setPayBusy] = useState(false);
+  const [payError, setPayError] = useState("");
+
+  const markPaid = (id: string) => {
+    setPayError("");
+    setPaying(payrolls.find((p) => p.id === id) ?? null);
+  };
+
+  const confirmPay = async () => {
+    if (!paying) return;
+    setPayBusy(true);
+    setPayError("");
     try {
-      await apiFetch(`/payroll/${id}/pay`, { method: "POST" });
+      await apiFetch(`/payroll/${paying.id}/pay`, {
+        method: "POST",
+        body: JSON.stringify({ accountId: payAccountId }),
+      });
+      setPaying(null);
       load();
-    } catch (err) {
-      console.error(err);
+    } catch (err: unknown) {
+      setPayError(err instanceof Error ? err.message : "Payment failed");
+    } finally {
+      setPayBusy(false);
     }
   };
 
@@ -198,14 +217,15 @@ export default function PayrollPage() {
                               <button
                                 onClick={() => markPaid(p.id)}
                                 className="p-1 text-ink-soft hover:text-success"
-                                title="Mark paid"
+                                title="Pay salary"
+                                aria-label="Pay salary"
                               >
                                 <Check size={16} />
                               </button>
                               <button
                                 onClick={() => handleDelete(p.id)}
                                 className="p-1 text-ink-soft hover:text-danger"
-                                title="Delete"
+                                title="Delete" aria-label="Delete payroll entry"
                               >
                                 <Trash2 size={16} />
                               </button>
@@ -272,6 +292,36 @@ export default function PayrollPage() {
           </div>
         </div>
       )}
+
+      <Dialog
+        open={paying !== null}
+        onClose={() => setPaying(null)}
+        title="Pay salary"
+        description={
+          paying
+            ? `${paying.employee.firstName} ${paying.employee.lastName} · ${paying.period}. The full gross salary is recorded as an expense; deductions are kept as owed until paid over.`
+            : undefined
+        }
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setPaying(null)}>Cancel</Button>
+            <Button onClick={confirmPay} isLoading={payBusy}>Pay {paying ? format(paying.net) : ""}</Button>
+          </>
+        }
+      >
+        {paying && (
+          <div className="rounded-xl bg-ivory p-4 text-sm grid grid-cols-2 gap-1">
+            <span className="text-ink-soft">Gross salary</span><span className="text-right tabular-nums">{format(paying.gross)}</span>
+            <span className="text-ink-soft">Deductions</span><span className="text-right tabular-nums">− {format(paying.deductions)}</span>
+            <span className="font-medium">Net pay</span><span className="text-right tabular-nums font-medium">{format(paying.net)}</span>
+          </div>
+        )}
+        <div>
+          <label className="block text-sm font-medium mb-1">Pay from</label>
+          <PaymentAccountSelect value={payAccountId} onChange={setPayAccountId} />
+        </div>
+        {payError && <p className="text-sm text-danger">{payError}</p>}
+      </Dialog>
     </div>
   );
 }
