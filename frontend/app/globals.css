@@ -1,32 +1,90 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand: #10b981;
-  --color-brand-light: #34d399;
-  --color-brand-dark: #047857;
-  --color-accent: #f59e0b;
-  --color-accent-light: #fbbf24;
-  --color-brand-50: #ecfdf5;
-  --color-brand-100: #d1fae5;
-  --color-brand-200: #a7f3d0;
-  --color-brand-300: #6ee7b7;
-  --color-brand-400: #34d399;
-  --color-brand-500: #10b981;
-  --color-brand-600: #059669;
-  --color-brand-700: #047857;
-  --color-brand-800: #065f46;
-  --color-brand-900: #064e3b;
-}
+  /* Biz44 Brand Palette */
+  --color-rose-vale: #AB6B73;
+  --color-rose-dark: #824C54;
+  --color-rose-light: #F1E1E3;
 
-body {
-  @apply bg-neutral-50 text-neutral-900 antialiased;
+  --color-navy: #243447;
+  --color-navy-dark: #1A2735;
+  --color-navy-light: #E7ECF1;
+
+  --color-ivory: #FAF8F5;
+  --color-border-soft: #E5DFDC;
+
+  --color-ink: #252525;
+  --color-ink-soft: #6B6563;
+
+  /* Semantic */
+  --color-success: #4F8068;
+  --color-warning: #C49A52;
+  --color-danger: #B94A48;
+  --color-info: #527A9E;
+  --color-gold: #C49A52;
+  --color-terracotta: #B96F5D;
+
+  /* Chart palette */
+  --color-chart-1: #AB6B73;
+  --color-chart-2: #243447;
+  --color-chart-3: #527A9E;
+  --color-chart-4: #4F8068;
+  --color-chart-5: #C49A52;
+  --color-chart-6: #B96F5D;
 }
 
 @layer base {
   body {
-    background-color: #ffffff;
-    color: #171717;
+    background-color: var(--color-ivory);
+    color: var(--color-ink);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+}
+/* ============================================
+   PRINT STYLES — invoice only
+   ============================================ */
+@media print {
+  /* Hide everything by default */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Show only the invoice area */
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+
+  .print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 24px;
+    background: white;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  /* Hide non-printing UI */
+  .no-print {
+    display: none !important;
+  }
+
+  /* Page setup */
+  @page {
+    margin: 12mm;
+    size: A4;
+  }
+
+  body {
+    background: white !important;
+  }
+}
+
+/* Focus ring uses Rose Vale */
+*:focus-visible {
+  outline: 2px solid var(--color-rose-vale);
+  outline-offset: 2px;
 }

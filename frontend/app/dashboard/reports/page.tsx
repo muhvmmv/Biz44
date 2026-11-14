@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import ReportNotes from "@/components/reports/ReportNotes";
 import PageHeader from "@/components/ui/PageHeader";
 import Skeleton from "@/components/ui/Skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -10,16 +9,21 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
 } from "recharts";
+import ReportNotes from "@/components/reports/ReportNotes";
+import { useCurrency } from "@/hooks/useCurrency";
+import { useLocationVersion } from "@/hooks/useLocationRefetch";
 
-const COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#f97316", "#ec4899"];
+const COLORS = ["#AB6B73", "#243447", "#527A9E", "#4F8068", "#C49A52", "#B96F5D", "#824C54", "#6B6563"];
 
 export default function ReportsPage() {
+  const { format } = useCurrency();
   const [loading, setLoading] = useState(true);
   const [salesByMonth, setSalesByMonth] = useState<{ month: string; total: number }[]>([]);
   const [topProducts, setTopProducts] = useState<{ name: string; quantity: number; total: number }[]>([]);
   const [topCustomers, setTopCustomers] = useState<{ name: string; total: number; invoices: number; outstanding: number }[]>([]);
   const [expenses, setExpenses] = useState<{ name: string; total: number }[]>([]);
   const [inventory, setInventory] = useState<{ name: string; sku: string | null; quantity: number; valueAtCost: number; valueAtPrice: number }[]>([]);
+  const version = useLocationVersion();
 
   useEffect(() => {
     let active = true;
@@ -38,7 +42,7 @@ export default function ReportsPage() {
       setInventory(i.data);
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [version]);
 
   if (loading) return <div className="p-6 space-y-4">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-64" />)}</div>;
 
@@ -53,15 +57,16 @@ export default function ReportsPage() {
           <CardHeader><CardTitle>Sales by Month</CardTitle></CardHeader>
           <CardContent>
             {salesByMonth.length === 0 ? (
-              <p className="text-center text-neutral-400 py-12">No data yet</p>
+              <p className="text-center text-ink-soft py-12">No data yet</p>
             ) : (
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={salesByMonth}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="month" />
-                  <YAxis />
-                  <Tooltip />
-                  <Bar dataKey="total" fill="#10b981" radius={[6, 6, 0, 0]} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5DFDC" />
+                  <XAxis dataKey="month" stroke="#6B6563" fontSize={12} />
+                  <YAxis stroke="#6B6563" fontSize={12} />
+                  <Tooltip formatter={(value) => format(Number(value))}
+                    contentStyle={{ borderRadius: 8, border: "1px solid #E5DFDC", background: "#fff" }} />
+                  <Bar dataKey="total" fill="#AB6B73" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -72,14 +77,14 @@ export default function ReportsPage() {
           <CardHeader><CardTitle>Expenses by Category</CardTitle></CardHeader>
           <CardContent>
             {expenses.length === 0 ? (
-              <p className="text-center text-neutral-400 py-12">No data yet</p>
+              <p className="text-center text-ink-soft py-12">No data yet</p>
             ) : (
               <ResponsiveContainer width="100%" height={280}>
                 <PieChart>
                   <Pie data={expenses} dataKey="total" nameKey="name" cx="50%" cy="50%" outerRadius={90} label>
                     {expenses.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                   </Pie>
-                  <Tooltip />
+                  <Tooltip formatter={(value) => format(Number(value))} />
                   <Legend />
                 </PieChart>
               </ResponsiveContainer>
@@ -93,16 +98,16 @@ export default function ReportsPage() {
           <CardHeader><CardTitle>Top Products</CardTitle></CardHeader>
           <CardContent>
             {topProducts.length === 0 ? (
-              <p className="text-center text-neutral-400 py-8">No data yet</p>
+              <p className="text-center text-ink-soft py-8">No data yet</p>
             ) : (
               <div className="space-y-3">
                 {topProducts.map((p, i) => (
-                  <div key={i} className="flex justify-between items-center py-2 border-b last:border-0">
+                  <div key={i} className="flex justify-between items-center py-2 border-b border-border-soft last:border-0">
                     <div>
-                      <p className="font-medium">{p.name}</p>
-                      <p className="text-xs text-neutral-500">{p.quantity} units sold</p>
+                      <p className="font-medium text-ink">{p.name}</p>
+                      <p className="text-xs text-ink-soft">{p.quantity} units sold</p>
                     </div>
-                    <span className="font-semibold">${p.total.toFixed(2)}</span>
+                    <span className="font-semibold text-ink">{format(p.total)}</span>
                   </div>
                 ))}
               </div>
@@ -114,19 +119,19 @@ export default function ReportsPage() {
           <CardHeader><CardTitle>Top Customers</CardTitle></CardHeader>
           <CardContent>
             {topCustomers.length === 0 ? (
-              <p className="text-center text-neutral-400 py-8">No data yet</p>
+              <p className="text-center text-ink-soft py-8">No data yet</p>
             ) : (
               <div className="space-y-3">
                 {topCustomers.map((c, i) => (
-                  <div key={i} className="flex justify-between items-center py-2 border-b last:border-0">
+                  <div key={i} className="flex justify-between items-center py-2 border-b border-border-soft last:border-0">
                     <div>
-                      <p className="font-medium">{c.name}</p>
-                      <p className="text-xs text-neutral-500">{c.invoices} invoices</p>
+                      <p className="font-medium text-ink">{c.name}</p>
+                      <p className="text-xs text-ink-soft">{c.invoices} invoices</p>
                     </div>
                     <div className="text-right">
-                      <p className="font-semibold">${c.total.toFixed(2)}</p>
+                      <p className="font-semibold text-ink">{format(c.total)}</p>
                       {c.outstanding > 0 && (
-                        <p className="text-xs text-amber-600">${c.outstanding.toFixed(2)} owed</p>
+                        <p className="text-xs text-warning">{format(c.outstanding)} owed</p>
                       )}
                     </div>
                   </div>
@@ -140,17 +145,17 @@ export default function ReportsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Inventory Valuation</CardTitle>
-          <p className="text-sm text-neutral-500">
-            Total cost value: <span className="font-semibold text-neutral-900">${totalInventoryValue.toFixed(2)}</span>
+          <p className="text-sm text-ink-soft">
+            Total cost value: <span className="font-semibold text-ink">{format(totalInventoryValue)}</span>
           </p>
         </CardHeader>
         <CardContent className="p-0">
           {inventory.length === 0 ? (
-            <p className="text-center text-neutral-400 py-12">No products yet</p>
+            <p className="text-center text-ink-soft py-12">No products yet</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-neutral-50 text-neutral-500 text-left">
+                <thead className="bg-ivory text-ink-soft text-left">
                   <tr>
                     <th className="px-6 py-3 font-medium">Product</th>
                     <th className="px-6 py-3 font-medium">SKU</th>
@@ -159,14 +164,14 @@ export default function ReportsPage() {
                     <th className="px-6 py-3 font-medium text-right">Value at Price</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-neutral-100">
+                <tbody className="divide-y divide-border-soft">
                   {inventory.map((p, i) => (
-                    <tr key={i} className="hover:bg-neutral-50">
-                      <td className="px-6 py-3 font-medium">{p.name}</td>
-                      <td className="px-6 py-3 text-neutral-500">{p.sku || "—"}</td>
-                      <td className="px-6 py-3 text-right">{p.quantity}</td>
-                      <td className="px-6 py-3 text-right">${p.valueAtCost.toFixed(2)}</td>
-                      <td className="px-6 py-3 text-right">${p.valueAtPrice.toFixed(2)}</td>
+                    <tr key={i} className="hover:bg-ivory">
+                      <td className="px-6 py-3 font-medium text-ink">{p.name}</td>
+                      <td className="px-6 py-3 text-ink-soft">{p.sku || "—"}</td>
+                      <td className="px-6 py-3 text-right text-ink">{p.quantity}</td>
+                      <td className="px-6 py-3 text-right text-ink">{format(p.valueAtCost)}</td>
+                      <td className="px-6 py-3 text-right text-ink">{format(p.valueAtPrice)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -175,7 +180,6 @@ export default function ReportsPage() {
           )}
         </CardContent>
       </Card>
-      {/* ... existing report cards ... */}
 
       <ReportNotes />
     </div>

@@ -1,13 +1,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import Skeleton from "@/components/ui/Skeleton";
 import { Card, CardContent } from "@/components/ui/Card";
+import NumericInput from "@/components/ui/NumericInput";
 import { Plus, Pencil, Trash2, Package, Grid, List } from "lucide-react";
+import { useCurrency } from "@/hooks/useCurrency";
 
 interface Product {
   id: string;
@@ -23,6 +26,7 @@ interface Product {
 type View = "table" | "grid";
 
 export default function ProductsPage() {
+  const { format } = useCurrency();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -48,15 +52,29 @@ export default function ProductsPage() {
   useEffect(() => {
     let active = true;
     apiFetch<{ success: boolean; data: Product[] }>("/products")
-      .then((res) => { if (active) setProducts(res.data); })
+      .then((res) => {
+        if (active) setProducts(res.data);
+      })
       .catch(console.error)
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const openNew = () => {
     setEditing(null);
-    setForm({ name: "", sku: "", description: "", price: 0, cost: 0, quantity: 0, reorderPoint: 0 });
+    setForm({
+      name: "",
+      sku: "",
+      description: "",
+      price: 0,
+      cost: 0,
+      quantity: 0,
+      reorderPoint: 0,
+    });
     setShowForm(true);
   };
 
@@ -85,13 +103,21 @@ export default function ProductsPage() {
     };
     try {
       if (editing) {
-        await apiFetch(`/products/${editing.id}`, { method: "PUT", body: JSON.stringify(payload) });
+        await apiFetch(`/products/${editing.id}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
       } else {
-        await apiFetch("/products", { method: "POST", body: JSON.stringify(payload) });
+        await apiFetch("/products", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
       }
       setShowForm(false);
       reload();
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -99,12 +125,15 @@ export default function ProductsPage() {
     try {
       await apiFetch(`/products/${id}`, { method: "DELETE" });
       reload();
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
-  const filtered = products.filter((p) =>
-    p.name.toLowerCase().includes(search.toLowerCase()) ||
-    (p.sku || "").toLowerCase().includes(search.toLowerCase())
+  const filtered = products.filter(
+    (p) =>
+      p.name.toLowerCase().includes(search.toLowerCase()) ||
+      (p.sku || "").toLowerCase().includes(search.toLowerCase())
   );
 
   const stockStatus = (p: Product) => {
@@ -120,23 +149,22 @@ export default function ProductsPage() {
         description="Manage your product catalog and inventory."
         actions={
           <div className="flex gap-2">
-            <div className="flex rounded-lg border border-neutral-300 bg-white overflow-hidden">
+            <div className="flex rounded-lg border border-border-soft bg-white overflow-hidden">
               <button
                 onClick={() => setView("table")}
-                className={`p-2 ${view === "table" ? "bg-brand-50 text-brand-700" : "text-neutral-500"}`}
+                className={`p-2 ${view === "table" ? "bg-rose-light text-rose-vale" : "text-ink-soft"}`}
               >
                 <List size={16} />
               </button>
               <button
                 onClick={() => setView("grid")}
-                className={`p-2 ${view === "grid" ? "bg-brand-50 text-brand-700" : "text-neutral-500"}`}
+                className={`p-2 ${view === "grid" ? "bg-rose-light text-rose-vale" : "text-ink-soft"}`}
               >
                 <Grid size={16} />
               </button>
             </div>
             <Button onClick={openNew}>
-              <Plus className="w-4 h-4 mr-1" />
-              Add Product
+              <Plus className="w-4 h-4 mr-1" /> Add Product
             </Button>
           </div>
         }
@@ -147,19 +175,23 @@ export default function ProductsPage() {
         placeholder="Search products by name or SKU..."
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        className="w-full sm:w-80 rounded-lg border border-neutral-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+        className="w-full sm:w-80 rounded-lg border border-border-soft bg-white px-4 py-2.5 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-rose-vale"
       />
 
       {loading ? (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-40" />)}
+          {[...Array(4)].map((_, i) => (
+            <Skeleton key={i} className="h-40" />
+          ))}
         </div>
       ) : filtered.length === 0 ? (
         <Card>
-          <CardContent className="py-16 text-center">
-            <Package className="w-12 h-12 text-neutral-300 mx-auto mb-4" />
-            <p className="text-neutral-500">No products yet.</p>
-            <Button onClick={openNew} className="mt-4">Add your first product</Button>
+          <CardContent className="py-16 text-center text-ink-soft">
+            <Package className="w-12 h-12 mx-auto mb-4 opacity-40" />
+            <p>No products yet.</p>
+            <Button onClick={openNew} className="mt-4">
+              Add your first product
+            </Button>
           </CardContent>
         </Card>
       ) : view === "grid" ? (
@@ -170,29 +202,49 @@ export default function ProductsPage() {
               <Card key={p.id} className="hover:shadow-md transition-shadow">
                 <CardContent className="p-5">
                   <div className="flex justify-between items-start mb-3">
-                    <div className="w-10 h-10 rounded-lg bg-brand-50 flex items-center justify-center text-brand-600">
+                    <div className="w-10 h-10 rounded-lg bg-rose-light flex items-center justify-center text-rose-vale">
                       <Package size={20} />
                     </div>
                     <Badge variant={status.variant}>{status.label}</Badge>
                   </div>
-                  <h3 className="font-semibold text-neutral-900 truncate">{p.name}</h3>
-                  {p.sku && <p className="text-xs text-neutral-500 mt-0.5">SKU: {p.sku}</p>}
-                  <p className="text-2xl font-bold mt-3">{p.quantity} <span className="text-sm font-normal text-neutral-500">units</span></p>
+                  <h3 className="font-semibold text-ink truncate">
+                    <Link
+                      href={`/dashboard/inventory/products/${p.id}`}
+                      className="hover:text-rose-vale"
+                    >
+                      {p.name}
+                    </Link>
+                  </h3>
+                  {p.sku && <p className="text-xs text-ink-soft mt-0.5">SKU: {p.sku}</p>}
+                  <p className="text-2xl font-bold mt-3 text-ink">
+                    {p.quantity}{" "}
+                    <span className="text-sm font-normal text-ink-soft">units</span>
+                  </p>
                   <div className="flex justify-between mt-3 text-sm">
                     <div>
-                      <p className="text-neutral-500 text-xs">Cost</p>
-                      <p className="font-medium">${p.cost.toFixed(2)}</p>
+                      <p className="text-ink-soft text-xs">Cost</p>
+                      <p className="font-medium text-ink">{format(p.cost)}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-neutral-500 text-xs">Selling</p>
-                      <p className="font-medium">${p.price.toFixed(2)}</p>
+                      <p className="text-ink-soft text-xs">Selling</p>
+                      <p className="font-medium text-ink">{format(p.price)}</p>
                     </div>
                   </div>
-                  <div className="flex gap-2 mt-4 pt-3 border-t">
-                    <Button variant="ghost" size="sm" onClick={() => openEdit(p)} className="flex-1">
+                  <div className="flex gap-2 mt-4 pt-3 border-t border-border-soft">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openEdit(p)}
+                      className="flex-1"
+                    >
                       <Pencil size={14} className="mr-1" /> Edit
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => handleDelete(p.id)} className="text-red-600 hover:bg-red-50">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDelete(p.id)}
+                      className="text-danger hover:bg-[#F4E2E1]"
+                    >
                       <Trash2 size={14} />
                     </Button>
                   </div>
@@ -206,7 +258,7 @@ export default function ProductsPage() {
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-neutral-50 text-neutral-500 text-left">
+                <thead className="bg-ivory text-ink-soft text-left">
                   <tr>
                     <th className="px-6 py-3 font-medium">Product</th>
                     <th className="px-6 py-3 font-medium">SKU</th>
@@ -217,25 +269,38 @@ export default function ProductsPage() {
                     <th className="px-6 py-3 font-medium w-24"></th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-neutral-100">
+                <tbody className="divide-y divide-border-soft">
                   {filtered.map((p) => {
                     const status = stockStatus(p);
                     return (
-                      <tr key={p.id} className="hover:bg-neutral-50">
-                        <td className="px-6 py-4 font-medium">{p.name}</td>
-                        <td className="px-6 py-4 text-neutral-500">{p.sku || "—"}</td>
-                        <td className="px-6 py-4">${p.cost.toFixed(2)}</td>
-                        <td className="px-6 py-4">${p.price.toFixed(2)}</td>
-                        <td className="px-6 py-4">{p.quantity}</td>
+                      <tr key={p.id} className="hover:bg-ivory">
+                        <td className="px-6 py-4 font-medium text-ink">
+                          <Link
+                            href={`/dashboard/inventory/products/${p.id}`}
+                            className="hover:text-rose-vale"
+                          >
+                            {p.name}
+                          </Link>
+                        </td>
+                        <td className="px-6 py-4 text-ink-soft">{p.sku || "—"}</td>
+                        <td className="px-6 py-4 text-ink">{format(p.cost)}</td>
+                        <td className="px-6 py-4 text-ink">{format(p.price)}</td>
+                        <td className="px-6 py-4 text-ink">{p.quantity}</td>
                         <td className="px-6 py-4">
                           <Badge variant={status.variant}>{status.label}</Badge>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex gap-2">
-                            <button onClick={() => openEdit(p)} className="p-1 text-neutral-400 hover:text-brand-600">
+                            <button
+                              onClick={() => openEdit(p)}
+                              className="p-1 text-ink-soft hover:text-rose-vale"
+                            >
                               <Pencil size={16} />
                             </button>
-                            <button onClick={() => handleDelete(p.id)} className="p-1 text-neutral-400 hover:text-red-600">
+                            <button
+                              onClick={() => handleDelete(p.id)}
+                              className="p-1 text-ink-soft hover:text-danger"
+                            >
                               <Trash2 size={16} />
                             </button>
                           </div>
@@ -252,54 +317,89 @@ export default function ProductsPage() {
 
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b">
-              <h2 className="text-lg font-bold">{editing ? "Edit Product" : "New Product"}</h2>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto border border-border-soft">
+            <div className="p-6 border-b border-border-soft">
+              <h2 className="text-lg font-bold text-navy">
+                {editing ? "Edit Product" : "New Product"}
+              </h2>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Name *</label>
-                <input required className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-                  value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                <label className="block text-sm font-medium mb-1 text-navy">Name *</label>
+                <input
+                  required
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1">SKU</label>
-                  <input className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-                    value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} />
+                  <label className="block text-sm font-medium mb-1 text-navy">SKU</label>
+                  <input
+                    value={form.sku}
+                    onChange={(e) => setForm({ ...form, sku: e.target.value })}
+                    className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Reorder level</label>
-                  <input type="number" min="0" className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-                    value={form.reorderPoint} onChange={(e) => setForm({ ...form, reorderPoint: Number(e.target.value) })} />
+                  <label className="block text-sm font-medium mb-1 text-navy">Reorder level</label>
+                  <NumericInput
+                    allowDecimals={false}
+                    min={0}
+                    value={form.reorderPoint}
+                    onChange={(v) => setForm({ ...form, reorderPoint: v })}
+                  />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1">Cost price</label>
-                  <input type="number" step="0.01" min="0" className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-                    value={form.cost} onChange={(e) => setForm({ ...form, cost: Number(e.target.value) })} />
+                  <label className="block text-sm font-medium mb-1 text-navy">Cost price</label>
+                  <NumericInput
+                    min={0}
+                    value={form.cost}
+                    onChange={(v) => setForm({ ...form, cost: v })}
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Selling price</label>
-                  <input type="number" step="0.01" min="0" className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-                    value={form.price} onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} />
+                  <label className="block text-sm font-medium mb-1 text-navy">Selling price</label>
+                  <NumericInput
+                    min={0}
+                    value={form.price}
+                    onChange={(v) => setForm({ ...form, price: v })}
+                  />
                 </div>
               </div>
               {!editing && (
                 <div>
-                  <label className="block text-sm font-medium mb-1">Initial quantity</label>
-                  <input type="number" min="0" className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-                    value={form.quantity} onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })} />
+                  <label className="block text-sm font-medium mb-1 text-navy">
+                    Initial quantity
+                  </label>
+                  <NumericInput
+                    allowDecimals={false}
+                    min={0}
+                    value={form.quantity}
+                    onChange={(v) => setForm({ ...form, quantity: v })}
+                  />
                 </div>
               )}
               <div>
-                <label className="block text-sm font-medium mb-1">Description</label>
-                <textarea rows={2} className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-                  value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+                <label className="block text-sm font-medium mb-1 text-navy">Description</label>
+                <textarea
+                  rows={2}
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                />
               </div>
               <div className="flex justify-end gap-2 pt-2">
-                <Button type="button" variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowForm(false)}
+                >
+                  Cancel
+                </Button>
                 <Button type="submit">{editing ? "Update" : "Create"}</Button>
               </div>
             </form>

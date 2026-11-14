@@ -9,33 +9,29 @@ import Badge from "@/components/ui/Badge";
 import Skeleton from "@/components/ui/Skeleton";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Plus, Receipt } from "lucide-react";
+import { useCurrency } from "@/hooks/useCurrency";
+import { useLocationVersion } from "@/hooks/useLocationRefetch";
 
 interface Invoice {
-  id: string;
-  invoiceNumber: string;
-  status: string;
-  total: number;
-  amountPaid: number;
-  dueDate: string | null;
-  createdAt: string;
+  id: string; invoiceNumber: string; status: string;
+  total: number; amountPaid: number; dueDate: string | null; createdAt: string;
   customer: { firstName: string; lastName: string } | null;
 }
 
 const statusVariant = (status: string): "success" | "warning" | "danger" | "info" | "default" => {
-  switch (status) {
-    case "paid": return "success";
-    case "partially_paid": return "info";
-    case "overdue": return "danger";
-    case "unpaid": return "warning";
-    case "cancelled": return "default";
-    default: return "default";
-  }
+  if (status === "paid") return "success";
+  if (status === "partially_paid") return "info";
+  if (status === "overdue") return "danger";
+  if (status === "unpaid") return "warning";
+  return "default";
 };
 
 export default function InvoicesPage() {
+  const { format } = useCurrency();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const version = useLocationVersion();
 
   useEffect(() => {
     let active = true;
@@ -44,7 +40,7 @@ export default function InvoicesPage() {
       .catch(console.error)
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [version]);
 
   const filtered = invoices.filter((inv) => {
     const q = search.toLowerCase();
@@ -61,21 +57,14 @@ export default function InvoicesPage() {
         description="Manage your sales invoices and payments."
         actions={
           <Link href="/dashboard/invoices/new">
-            <Button>
-              <Plus className="w-4 h-4 mr-1" />
-              New Invoice
-            </Button>
+            <Button><Plus className="w-4 h-4 mr-1" /> New Invoice</Button>
           </Link>
         }
       />
 
-      <input
-        type="text"
-        placeholder="Search by invoice number or customer..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="w-full sm:w-80 rounded-lg border border-neutral-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-      />
+      <input type="text" placeholder="Search by invoice number or customer..."
+        value={search} onChange={(e) => setSearch(e.target.value)}
+        className="w-full sm:w-80 rounded-lg border border-border-soft bg-white px-4 py-2.5 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-rose-vale" />
 
       <Card>
         <CardContent className="p-0">
@@ -84,8 +73,8 @@ export default function InvoicesPage() {
               {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12" />)}
             </div>
           ) : filtered.length === 0 ? (
-            <div className="py-16 text-center text-neutral-400">
-              <Receipt className="w-12 h-12 mx-auto mb-3 text-neutral-300" />
+            <div className="py-16 text-center text-ink-soft">
+              <Receipt className="w-12 h-12 mx-auto mb-3 opacity-40" />
               <p>No invoices yet.</p>
               <Link href="/dashboard/invoices/new">
                 <Button className="mt-4">Create your first invoice</Button>
@@ -94,7 +83,7 @@ export default function InvoicesPage() {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-neutral-50 text-neutral-500 text-left">
+                <thead className="bg-ivory text-ink-soft text-left">
                   <tr>
                     <th className="px-6 py-3 font-medium">Invoice</th>
                     <th className="px-6 py-3 font-medium">Customer</th>
@@ -105,36 +94,23 @@ export default function InvoicesPage() {
                     <th className="px-6 py-3 font-medium">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-neutral-100">
+                <tbody className="divide-y divide-border-soft">
                   {filtered.map((inv) => (
-                    <tr key={inv.id} className="hover:bg-neutral-50">
+                    <tr key={inv.id} className="hover:bg-ivory">
                       <td className="px-6 py-4">
-                        <Link
-                          href={`/dashboard/invoices/${inv.id}`}
-                          className="font-medium text-brand-700 hover:underline"
-                        >
+                        <Link href={`/dashboard/invoices/${inv.id}`} className="font-medium text-rose-vale hover:underline">
                           {inv.invoiceNumber}
                         </Link>
                       </td>
-                      <td className="px-6 py-4 text-neutral-700">
+                      <td className="px-6 py-4 text-ink-soft">
                         {inv.customer ? `${inv.customer.firstName} ${inv.customer.lastName}` : "—"}
                       </td>
-                      <td className="px-6 py-4 text-neutral-600">
-                        {new Date(inv.createdAt).toLocaleDateString()}
-                      </td>
-                      <td className="px-6 py-4 text-neutral-600">
-                        {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : "—"}
-                      </td>
-                      <td className="px-6 py-4 text-right font-medium">
-                        ${inv.total.toFixed(2)}
-                      </td>
-                      <td className="px-6 py-4 text-right text-neutral-600">
-                        ${inv.amountPaid.toFixed(2)}
-                      </td>
+                      <td className="px-6 py-4 text-ink-soft">{new Date(inv.createdAt).toLocaleDateString()}</td>
+                      <td className="px-6 py-4 text-ink-soft">{inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : "—"}</td>
+                      <td className="px-6 py-4 text-right font-medium text-ink">{format(inv.total)}</td>
+                      <td className="px-6 py-4 text-right text-ink-soft">{format(inv.amountPaid)}</td>
                       <td className="px-6 py-4">
-                        <Badge variant={statusVariant(inv.status)}>
-                          {inv.status.replace("_", " ")}
-                        </Badge>
+                        <Badge variant={statusVariant(inv.status)}>{inv.status.replace("_", " ")}</Badge>
                       </td>
                     </tr>
                   ))}

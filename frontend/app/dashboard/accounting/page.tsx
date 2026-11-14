@@ -1,50 +1,117 @@
 "use client";
 
-import Link from "next/link";
+import { useEffect, useState } from "react";
+import { apiFetch } from "@/lib/api";
 import PageHeader from "@/components/ui/PageHeader";
+import Skeleton from "@/components/ui/Skeleton";
 import { Card, CardContent } from "@/components/ui/Card";
-import {
-  Receipt,
-  DollarSign,
-  TrendingUp,
-  Wallet,
-  ArrowRight,
-} from "lucide-react";
+import { Wallet, Landmark, TrendingUp, Package, CreditCard } from "lucide-react";
+import { useCurrency } from "@/hooks/useCurrency";
 
-const links = [
-  { title: "Transactions", desc: "All financial movements", href: "/dashboard/accounting/transactions", icon: Receipt, color: "text-brand-600 bg-brand-50" },
-  { title: "Expenses", desc: "Record and review expenses", href: "/dashboard/accounting/expenses", icon: DollarSign, color: "text-red-600 bg-red-50" },
-  { title: "Accounts Receivable", desc: "Money customers owe you", href: "/dashboard/accounting/receivable", icon: TrendingUp, color: "text-amber-600 bg-amber-50" },
-  { title: "Cash & Banks", desc: "Balances and movement", href: "/dashboard/accounting/accounts", icon: Wallet, color: "text-violet-600 bg-violet-50" },
-  { title: "Profit & Loss", desc: "Income statement", href: "/dashboard/accounting/profit-loss", icon: TrendingUp, color: "text-emerald-600 bg-emerald-50" },
-];
+interface Account {
+  id: string; name: string; type: string; balance: number;
+}
 
-export default function AccountingOverviewPage() {
+const iconFor = (name: string) => {
+  if (name.toLowerCase().includes("cash")) return Wallet;
+  if (name.toLowerCase().includes("bank")) return Landmark;
+  if (name.toLowerCase().includes("receivable")) return TrendingUp;
+  if (name.toLowerCase().includes("inventory")) return Package;
+  if (name.toLowerCase().includes("payable")) return CreditCard;
+  return Wallet;
+};
+
+export default function AccountsPage() {
+  const { format } = useCurrency();
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    apiFetch<{ success: boolean; data: Account[] }>("/accounting/accounts")
+      .then((res) => { if (active) setAccounts(res.data); })
+      .catch(console.error)
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  const assetAccounts = accounts.filter((a) => a.type === "asset");
+  const liabilityAccounts = accounts.filter((a) => a.type === "liability");
+  const totalAssets = assetAccounts.reduce((s, a) => s + a.balance, 0);
+  const totalLiabilities = liabilityAccounts.reduce((s, a) => s + a.balance, 0);
+
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Accounting"
-        description="Manage your financial records and reports."
-      />
+      <PageHeader title="Cash & Banks" description="Your financial account balances." />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {links.map(({ title, desc, href, icon: Icon, color }) => (
-          <Link key={href} href={href}>
-            <Card className="hover:shadow-md hover:border-brand-200 transition-all cursor-pointer h-full">
-              <CardContent className="p-6">
-                <div className={`w-12 h-12 rounded-xl ${color} flex items-center justify-center mb-4`}>
-                  <Icon size={22} />
-                </div>
-                <h3 className="font-semibold text-neutral-900">{title}</h3>
-                <p className="text-sm text-neutral-500 mt-1">{desc}</p>
-                <div className="flex items-center gap-1 text-brand-600 text-sm font-medium mt-4">
-                  View <ArrowRight size={14} />
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
-      </div>
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-32" />)}
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Card><CardContent className="p-5">
+              <p className="text-sm text-ink-soft">Total Assets</p>
+              <p className="text-2xl font-bold mt-1 text-ink">{format(totalAssets)}</p>
+            </CardContent></Card>
+            <Card><CardContent className="p-5">
+              <p className="text-sm text-ink-soft">Total Liabilities</p>
+              <p className="text-2xl font-bold mt-1 text-ink">{format(totalLiabilities)}</p>
+            </CardContent></Card>
+            <Card><CardContent className="p-5">
+              <p className="text-sm text-ink-soft">Net Position</p>
+              <p className="text-2xl font-bold mt-1 text-ink">{format(totalAssets - totalLiabilities)}</p>
+            </CardContent></Card>
+          </div>
+
+          <div>
+            <h3 className="font-semibold text-navy mb-3">Assets</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {assetAccounts.map((a) => {
+                const Icon = iconFor(a.name);
+                return (
+                  <Card key={a.id}>
+                    <CardContent className="p-5 flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-xl bg-rose-light text-rose-vale flex items-center justify-center">
+                        <Icon size={22} />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm text-ink-soft">{a.name}</p>
+                        <p className="text-xl font-bold text-ink">{format(a.balance)}</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+
+          {liabilityAccounts.length > 0 && (
+            <div>
+              <h3 className="font-semibold text-navy mb-3">Liabilities</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {liabilityAccounts.map((a) => {
+                  const Icon = iconFor(a.name);
+                  return (
+                    <Card key={a.id}>
+                      <CardContent className="p-5 flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-xl bg-[#F4E2E1] text-danger flex items-center justify-center">
+                          <Icon size={22} />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm text-ink-soft">{a.name}</p>
+                          <p className="text-xl font-bold text-ink">{format(a.balance)}</p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

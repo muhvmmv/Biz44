@@ -9,11 +9,13 @@ import Badge from "@/components/ui/Badge";
 import Skeleton from "@/components/ui/Skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Plus } from "lucide-react";
+import { useCurrency } from "@/hooks/useCurrency";
 
 interface Data {
   employee: {
-    id: string; firstName: string; lastName: string; email: string | null;
-    phone: string | null; position: string | null; salary: number;
+    id: string; firstName: string; lastName: string;
+    email: string | null; phone: string | null;
+    position: string | null; salary: number;
     hireDate: string | null; createdAt: string;
   };
   attendance: { id: string; date: string; status: string; notes: string | null }[];
@@ -24,6 +26,7 @@ interface Data {
 
 export default function EmployeeDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const { format } = useCurrency();
   const [data, setData] = useState<Data | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"overview" | "attendance" | "payroll" | "leave">("overview");
@@ -63,7 +66,7 @@ export default function EmployeeDetailPage() {
   };
 
   if (loading) return <div className="p-8"><Skeleton className="h-96" /></div>;
-  if (!data) return <div className="p-8 text-neutral-500">Employee not found.</div>;
+  if (!data) return <div className="p-8 text-ink-soft">Employee not found.</div>;
 
   const { employee, attendance, attendanceSummary, leaves, payrolls } = data;
 
@@ -81,32 +84,29 @@ export default function EmployeeDetailPage() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card><CardContent className="p-5">
-          <p className="text-sm text-neutral-500">Salary</p>
-          <p className="text-2xl font-bold mt-1">${employee.salary.toFixed(2)}</p>
+          <p className="text-sm text-ink-soft">Salary</p>
+          <p className="text-2xl font-bold mt-1 text-ink">{format(employee.salary)}</p>
         </CardContent></Card>
         <Card><CardContent className="p-5">
-          <p className="text-sm text-neutral-500">Present</p>
-          <p className="text-2xl font-bold mt-1 text-emerald-600">{attendanceSummary.present}</p>
+          <p className="text-sm text-ink-soft">Present</p>
+          <p className="text-2xl font-bold mt-1 text-success">{attendanceSummary.present}</p>
         </CardContent></Card>
         <Card><CardContent className="p-5">
-          <p className="text-sm text-neutral-500">Absent</p>
-          <p className="text-2xl font-bold mt-1 text-red-600">{attendanceSummary.absent}</p>
+          <p className="text-sm text-ink-soft">Absent</p>
+          <p className="text-2xl font-bold mt-1 text-danger">{attendanceSummary.absent}</p>
         </CardContent></Card>
         <Card><CardContent className="p-5">
-          <p className="text-sm text-neutral-500">Late</p>
-          <p className="text-2xl font-bold mt-1 text-amber-600">{attendanceSummary.late}</p>
+          <p className="text-sm text-ink-soft">Late</p>
+          <p className="text-2xl font-bold mt-1 text-warning">{attendanceSummary.late}</p>
         </CardContent></Card>
       </div>
 
-      <div className="flex gap-2 border-b border-neutral-200">
+      <div className="flex gap-2 border-b border-border-soft">
         {(["overview", "attendance", "payroll", "leave"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
+          <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${
-              tab === t ? "border-brand-600 text-brand-700" : "border-transparent text-neutral-500 hover:text-neutral-700"
-            }`}
-          >
+              tab === t ? "border-rose-vale text-rose-vale" : "border-transparent text-ink-soft hover:text-navy"
+            }`}>
             {t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
         ))}
@@ -114,11 +114,11 @@ export default function EmployeeDetailPage() {
 
       {tab === "overview" && (
         <Card>
-          <CardHeader><CardTitle>Contact & Info</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Contact &amp; Info</CardTitle></CardHeader>
           <CardContent className="grid sm:grid-cols-3 gap-4 text-sm">
-            <div><p className="text-neutral-500">Email</p><p className="font-medium">{employee.email || "—"}</p></div>
-            <div><p className="text-neutral-500">Phone</p><p className="font-medium">{employee.phone || "—"}</p></div>
-            <div><p className="text-neutral-500">Hire date</p><p className="font-medium">{employee.hireDate ? new Date(employee.hireDate).toLocaleDateString() : "—"}</p></div>
+            <div><p className="text-ink-soft">Email</p><p className="font-medium text-ink">{employee.email || "—"}</p></div>
+            <div><p className="text-ink-soft">Phone</p><p className="font-medium text-ink">{employee.phone || "—"}</p></div>
+            <div><p className="text-ink-soft">Hire date</p><p className="font-medium text-ink">{employee.hireDate ? new Date(employee.hireDate).toLocaleDateString() : "—"}</p></div>
           </CardContent>
         </Card>
       )}
@@ -126,28 +126,26 @@ export default function EmployeeDetailPage() {
       {tab === "attendance" && (
         <Card><CardContent className="p-0">
           <table className="w-full text-sm">
-            <thead className="bg-neutral-50 text-neutral-500 text-left">
+            <thead className="bg-ivory text-ink-soft text-left">
               <tr>
                 <th className="px-6 py-3 font-medium">Date</th>
                 <th className="px-6 py-3 font-medium">Status</th>
                 <th className="px-6 py-3 font-medium">Notes</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-100">
+            <tbody className="divide-y divide-border-soft">
               {attendance.map((a) => (
                 <tr key={a.id}>
-                  <td className="px-6 py-3 text-neutral-600">{new Date(a.date).toLocaleDateString()}</td>
+                  <td className="px-6 py-3 text-ink-soft">{new Date(a.date).toLocaleDateString()}</td>
                   <td className="px-6 py-3">
                     <Badge variant={a.status === "present" ? "success" : a.status === "absent" ? "danger" : a.status === "late" ? "warning" : "info"}>
                       {a.status}
                     </Badge>
                   </td>
-                  <td className="px-6 py-3 text-neutral-500">{a.notes || "—"}</td>
+                  <td className="px-6 py-3 text-ink-soft">{a.notes || "—"}</td>
                 </tr>
               ))}
-              {attendance.length === 0 && (
-                <tr><td colSpan={3} className="text-center text-neutral-400 py-8">No attendance records</td></tr>
-              )}
+              {attendance.length === 0 && <tr><td colSpan={3} className="text-center text-ink-soft py-8">No attendance records</td></tr>}
             </tbody>
           </table>
         </CardContent></Card>
@@ -156,7 +154,7 @@ export default function EmployeeDetailPage() {
       {tab === "payroll" && (
         <Card><CardContent className="p-0">
           <table className="w-full text-sm">
-            <thead className="bg-neutral-50 text-neutral-500 text-left">
+            <thead className="bg-ivory text-ink-soft text-left">
               <tr>
                 <th className="px-6 py-3 font-medium">Period</th>
                 <th className="px-6 py-3 font-medium text-right">Gross</th>
@@ -164,18 +162,16 @@ export default function EmployeeDetailPage() {
                 <th className="px-6 py-3 font-medium">Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-100">
+            <tbody className="divide-y divide-border-soft">
               {payrolls.map((p) => (
                 <tr key={p.id}>
-                  <td className="px-6 py-3 font-medium">{p.period}</td>
-                  <td className="px-6 py-3 text-right">${p.gross.toFixed(2)}</td>
-                  <td className="px-6 py-3 text-right font-medium">${p.net.toFixed(2)}</td>
+                  <td className="px-6 py-3 font-medium text-ink">{p.period}</td>
+                  <td className="px-6 py-3 text-right text-ink">{format(p.gross)}</td>
+                  <td className="px-6 py-3 text-right font-medium text-ink">{format(p.net)}</td>
                   <td className="px-6 py-3"><Badge variant={p.status === "paid" ? "success" : "warning"}>{p.status}</Badge></td>
                 </tr>
               ))}
-              {payrolls.length === 0 && (
-                <tr><td colSpan={4} className="text-center text-neutral-400 py-8">No payroll entries</td></tr>
-              )}
+              {payrolls.length === 0 && <tr><td colSpan={4} className="text-center text-ink-soft py-8">No payroll entries</td></tr>}
             </tbody>
           </table>
         </CardContent></Card>
@@ -184,7 +180,7 @@ export default function EmployeeDetailPage() {
       {tab === "leave" && (
         <Card><CardContent className="p-0">
           <table className="w-full text-sm">
-            <thead className="bg-neutral-50 text-neutral-500 text-left">
+            <thead className="bg-ivory text-ink-soft text-left">
               <tr>
                 <th className="px-6 py-3 font-medium">Type</th>
                 <th className="px-6 py-3 font-medium">From</th>
@@ -192,18 +188,20 @@ export default function EmployeeDetailPage() {
                 <th className="px-6 py-3 font-medium">Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-100">
+            <tbody className="divide-y divide-border-soft">
               {leaves.map((l) => (
                 <tr key={l.id}>
                   <td className="px-6 py-3"><Badge variant="info">{l.type}</Badge></td>
-                  <td className="px-6 py-3 text-neutral-600">{new Date(l.startDate).toLocaleDateString()}</td>
-                  <td className="px-6 py-3 text-neutral-600">{new Date(l.endDate).toLocaleDateString()}</td>
-                  <td className="px-6 py-3"><Badge variant={l.status === "approved" ? "success" : l.status === "rejected" ? "danger" : "warning"}>{l.status}</Badge></td>
+                  <td className="px-6 py-3 text-ink-soft">{new Date(l.startDate).toLocaleDateString()}</td>
+                  <td className="px-6 py-3 text-ink-soft">{new Date(l.endDate).toLocaleDateString()}</td>
+                  <td className="px-6 py-3">
+                    <Badge variant={l.status === "approved" ? "success" : l.status === "rejected" ? "danger" : "warning"}>
+                      {l.status}
+                    </Badge>
+                  </td>
                 </tr>
               ))}
-              {leaves.length === 0 && (
-                <tr><td colSpan={4} className="text-center text-neutral-400 py-8">No leave requests</td></tr>
-              )}
+              {leaves.length === 0 && <tr><td colSpan={4} className="text-center text-ink-soft py-8">No leave requests</td></tr>}
             </tbody>
           </table>
         </CardContent></Card>
@@ -211,26 +209,24 @@ export default function EmployeeDetailPage() {
 
       {showAttendance && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
-            <div className="p-6 border-b">
-              <h2 className="text-lg font-bold">Mark Attendance</h2>
-              <p className="text-sm text-neutral-500 mt-1">{employee.firstName} {employee.lastName}</p>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-border-soft">
+            <div className="p-6 border-b border-border-soft">
+              <h2 className="text-lg font-bold text-navy">Mark Attendance</h2>
+              <p className="text-sm text-ink-soft mt-1">{employee.firstName} {employee.lastName}</p>
             </div>
             <form onSubmit={markAttendance} className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Date</label>
-                <input type="date" value={attForm.date}
-                  onChange={(e) => setAttForm({ ...attForm, date: e.target.value })}
-                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" />
+                <label className="block text-sm font-medium mb-1 text-navy">Date</label>
+                <input type="date" value={attForm.date} onChange={(e) => setAttForm({ ...attForm, date: e.target.value })}
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Status</label>
+                <label className="block text-sm font-medium mb-1 text-navy">Status</label>
                 <div className="grid grid-cols-4 gap-2">
                   {["present", "absent", "late", "leave"].map((s) => (
-                    <button key={s} type="button"
-                      onClick={() => setAttForm({ ...attForm, status: s })}
+                    <button key={s} type="button" onClick={() => setAttForm({ ...attForm, status: s })}
                       className={`py-2 rounded-lg text-sm font-medium border transition ${
-                        attForm.status === s ? "border-brand-500 bg-brand-50 text-brand-700" : "border-neutral-200"
+                        attForm.status === s ? "border-rose-vale bg-rose-light text-rose-dark" : "border-border-soft text-ink-soft"
                       }`}>
                       {s}
                     </button>
@@ -238,10 +234,9 @@ export default function EmployeeDetailPage() {
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Notes</label>
-                <input value={attForm.notes}
-                  onChange={(e) => setAttForm({ ...attForm, notes: e.target.value })}
-                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" />
+                <label className="block text-sm font-medium mb-1 text-navy">Notes</label>
+                <input value={attForm.notes} onChange={(e) => setAttForm({ ...attForm, notes: e.target.value })}
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="outline" onClick={() => setShowAttendance(false)}>Cancel</Button>

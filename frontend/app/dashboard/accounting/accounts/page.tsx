@@ -1,118 +1,41 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import Link from "next/link";
 import PageHeader from "@/components/ui/PageHeader";
-import Skeleton from "@/components/ui/Skeleton";
 import { Card, CardContent } from "@/components/ui/Card";
-import { Wallet, Landmark, TrendingUp, Package, CreditCard } from "lucide-react";
+import { Receipt, DollarSign, TrendingUp, Wallet, ArrowRight } from "lucide-react";
 
-interface Account {
-  id: string;
-  name: string;
-  type: string;
-  balance: number;
-}
+const links = [
+  { title: "Transactions", desc: "All financial movements", href: "/dashboard/accounting/transactions", icon: Receipt, color: "text-rose-vale bg-rose-light" },
+  { title: "Expenses", desc: "Record and review expenses", href: "/dashboard/accounting/expenses", icon: DollarSign, color: "text-danger bg-[#F4E2E1]" },
+  { title: "Accounts Receivable", desc: "Money customers owe you", href: "/dashboard/accounting/receivable", icon: TrendingUp, color: "text-warning bg-[#F7EEDC]" },
+  { title: "Cash & Banks", desc: "Balances and movement", href: "/dashboard/accounting/accounts", icon: Wallet, color: "text-navy bg-navy-light" },
+  { title: "Profit & Loss", desc: "Income statement", href: "/dashboard/accounting/profit-loss", icon: TrendingUp, color: "text-success bg-[#E6F0EA]" },
+];
 
-const iconFor = (name: string) => {
-  if (name.toLowerCase().includes("cash")) return Wallet;
-  if (name.toLowerCase().includes("bank")) return Landmark;
-  if (name.toLowerCase().includes("receivable")) return TrendingUp;
-  if (name.toLowerCase().includes("inventory")) return Package;
-  if (name.toLowerCase().includes("payable")) return CreditCard;
-  return Wallet;
-};
-
-export default function AccountsPage() {
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let active = true;
-    apiFetch<{ success: boolean; data: Account[] }>("/accounting/accounts")
-      .then((res) => { if (active) setAccounts(res.data); })
-      .catch(console.error)
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, []);
-
-  const assetAccounts = accounts.filter((a) => a.type === "asset");
-  const liabilityAccounts = accounts.filter((a) => a.type === "liability");
-  const totalAssets = assetAccounts.reduce((s, a) => s + a.balance, 0);
-  const totalLiabilities = liabilityAccounts.reduce((s, a) => s + a.balance, 0);
-
+export default function AccountingOverviewPage() {
   return (
     <div className="space-y-6">
-      <PageHeader title="Cash & Banks" description="Your financial account balances." />
+      <PageHeader title="Accounting" description="Manage your financial records and reports." />
 
-      {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-32" />)}
-        </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Card><CardContent className="p-5">
-              <p className="text-sm text-neutral-500">Total Assets</p>
-              <p className="text-2xl font-bold mt-1">${totalAssets.toFixed(2)}</p>
-            </CardContent></Card>
-            <Card><CardContent className="p-5">
-              <p className="text-sm text-neutral-500">Total Liabilities</p>
-              <p className="text-2xl font-bold mt-1">${totalLiabilities.toFixed(2)}</p>
-            </CardContent></Card>
-            <Card><CardContent className="p-5">
-              <p className="text-sm text-neutral-500">Net Position</p>
-              <p className="text-2xl font-bold mt-1">${(totalAssets - totalLiabilities).toFixed(2)}</p>
-            </CardContent></Card>
-          </div>
-
-          <div>
-            <h3 className="font-semibold text-neutral-700 mb-3">Assets</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {assetAccounts.map((a) => {
-                const Icon = iconFor(a.name);
-                return (
-                  <Card key={a.id}>
-                    <CardContent className="p-5 flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center">
-                        <Icon size={22} />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm text-neutral-500">{a.name}</p>
-                        <p className="text-xl font-bold">${a.balance.toFixed(2)}</p>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          </div>
-
-          {liabilityAccounts.length > 0 && (
-            <div>
-              <h3 className="font-semibold text-neutral-700 mb-3">Liabilities</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {liabilityAccounts.map((a) => {
-                  const Icon = iconFor(a.name);
-                  return (
-                    <Card key={a.id}>
-                      <CardContent className="p-5 flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">
-                          <Icon size={22} />
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-sm text-neutral-500">{a.name}</p>
-                          <p className="text-xl font-bold">${a.balance.toFixed(2)}</p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </>
-      )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {links.map(({ title, desc, href, icon: Icon, color }) => (
+          <Link key={href} href={href}>
+            <Card className="hover:shadow-md hover:border-rose-vale transition-all cursor-pointer h-full">
+              <CardContent className="p-6">
+                <div className={`w-12 h-12 rounded-xl ${color} flex items-center justify-center mb-4`}>
+                  <Icon size={22} />
+                </div>
+                <h3 className="font-semibold text-ink">{title}</h3>
+                <p className="text-sm text-ink-soft mt-1">{desc}</p>
+                <div className="flex items-center gap-1 text-rose-vale text-sm font-medium mt-4">
+                  View <ArrowRight size={14} />
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }

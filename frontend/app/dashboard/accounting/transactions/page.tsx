@@ -6,13 +6,12 @@ import PageHeader from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import Skeleton from "@/components/ui/Skeleton";
 import { Card, CardContent } from "@/components/ui/Card";
+import { useCurrency } from "@/hooks/useCurrency";
+import { useLocationVersion } from "@/hooks/useLocationRefetch";
 
 interface Transaction {
-  id: string;
-  type: string;
-  description: string | null;
-  amount: number;
-  date: string;
+  id: string; type: string; description: string | null;
+  amount: number; date: string;
   account: { name: string; type: string };
 }
 
@@ -26,9 +25,11 @@ const typeVariant: Record<string, "success" | "danger" | "info" | "warning" | "d
 };
 
 export default function TransactionsPage() {
+  const { format } = useCurrency();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
+  const version = useLocationVersion();
 
   useEffect(() => {
     let active = true;
@@ -38,14 +39,11 @@ export default function TransactionsPage() {
       .catch(console.error)
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [filter]);
+  }, [filter, version]);
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Transactions"
-        description="Every financial event in your business."
-      />
+      <PageHeader title="Transactions" description="Every financial event in your business." />
 
       <div className="flex gap-2 flex-wrap">
         {["", "sale", "payment", "expense", "payroll", "refund"].map((t) => (
@@ -54,8 +52,8 @@ export default function TransactionsPage() {
             onClick={() => setFilter(t)}
             className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${
               filter === t
-                ? "bg-brand-600 text-white"
-                : "bg-white border border-neutral-200 text-neutral-600 hover:border-brand-300"
+                ? "bg-rose-vale text-white"
+                : "bg-white border border-border-soft text-ink-soft hover:border-rose-vale"
             }`}
           >
             {t === "" ? "All" : t.charAt(0).toUpperCase() + t.slice(1)}
@@ -66,17 +64,15 @@ export default function TransactionsPage() {
       <Card>
         <CardContent className="p-0">
           {loading ? (
-            <div className="p-6 space-y-3">
-              {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-12" />)}
-            </div>
+            <div className="p-6 space-y-3">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-12" />)}</div>
           ) : transactions.length === 0 ? (
-            <div className="py-16 text-center text-neutral-400">
+            <div className="py-16 text-center text-ink-soft">
               <p>No transactions yet.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-neutral-50 text-neutral-500 text-left">
+                <thead className="bg-ivory text-ink-soft text-left">
                   <tr>
                     <th className="px-6 py-3 font-medium">Date</th>
                     <th className="px-6 py-3 font-medium">Type</th>
@@ -85,20 +81,14 @@ export default function TransactionsPage() {
                     <th className="px-6 py-3 font-medium text-right">Amount</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-neutral-100">
+                <tbody className="divide-y divide-border-soft">
                   {transactions.map((t) => (
-                    <tr key={t.id} className="hover:bg-neutral-50">
-                      <td className="px-6 py-3 text-neutral-600">
-                        {new Date(t.date).toLocaleDateString()}
-                      </td>
-                      <td className="px-6 py-3">
-                        <Badge variant={typeVariant[t.type] || "default"}>{t.type}</Badge>
-                      </td>
-                      <td className="px-6 py-3 text-neutral-700">{t.account.name}</td>
-                      <td className="px-6 py-3 text-neutral-600">{t.description || "—"}</td>
-                      <td className="px-6 py-3 text-right font-medium">
-                        ${t.amount.toFixed(2)}
-                      </td>
+                    <tr key={t.id} className="hover:bg-ivory">
+                      <td className="px-6 py-3 text-ink-soft">{new Date(t.date).toLocaleDateString()}</td>
+                      <td className="px-6 py-3"><Badge variant={typeVariant[t.type] || "default"}>{t.type}</Badge></td>
+                      <td className="px-6 py-3 text-ink">{t.account.name}</td>
+                      <td className="px-6 py-3 text-ink-soft">{t.description || "—"}</td>
+                      <td className="px-6 py-3 text-right font-medium text-ink">{format(t.amount)}</td>
                     </tr>
                   ))}
                 </tbody>

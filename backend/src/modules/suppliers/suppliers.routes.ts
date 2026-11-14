@@ -18,20 +18,42 @@ router.get('/:id/summary', async (req: Request, res: Response, next: NextFunctio
     });
     if (!supplier) return res.status(404).json({ success: false, message: 'Not found' });
 
-    const receipts = await prisma.stockMovement.findMany({
-      where: { companyId, type: 'receipt' },
-      orderBy: { createdAt: 'desc' },
-      include: { product: { select: { name: true, sku: true } } },
-      take: 100,
+    const purchases = await prisma.purchase.findMany({
+      where: { companyId, supplierId: supplier.id },
+      orderBy: { date: 'desc' },
+      include: {
+        items: { include: { product: { select: { name: true, sku: true } } } },
+      },
     });
 
-    const totalPurchased = receipts.reduce((s: number, r: { quantity: number }) => s + Math.abs(r.quantity), 0);
+    const totalPurchased = purchases.reduce((s, p) => s + p.total, 0);
+    const totalPaid = purchases.reduce((s, p) => s + p.amountPaid, 0);
+    const outstanding = totalPurchased - totalPaid;
+
+    const receipts = purchases.flatMap((p) =>
+      p.items.map((it) => ({
+        id: it.id,
+        quantity: it.quantity,
+        unitCost: it.unitCost,
+        total: it.total,
+        reference: p.reference,
+        createdAt: p.date,
+        product: it.product,
+      }))
+    );
 
     res.json({
       success: true,
       data: {
         supplier,
-        summary: { totalPurchased, receiptCount: receipts.length },
+        summary: {
+          totalPurchased,
+          totalPaid,
+          outstanding,
+          purchaseCount: purchases.length,
+          totalUnits: receipts.reduce((s, r) => s + r.quantity, 0),
+        },
+        purchases,
         receipts,
       },
     });

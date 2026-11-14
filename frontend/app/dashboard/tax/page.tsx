@@ -5,16 +5,15 @@ import { apiFetch } from "@/lib/api";
 import PageHeader from "@/components/ui/PageHeader";
 import Skeleton from "@/components/ui/Skeleton";
 import { Card, CardContent } from "@/components/ui/Card";
-import { ScrollText, AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
+import { useCurrency } from "@/hooks/useCurrency";
 
 interface Invoice {
-  total: number;
-  taxTotal: number;
-  status: string;
-  finalizedAt: string | null;
+  total: number; taxTotal: number; status: string; finalizedAt: string | null;
 }
 
 export default function TaxPage() {
+  const { format } = useCurrency();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [taxRate, setTaxRate] = useState(7.5);
@@ -43,10 +42,7 @@ export default function TaxPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Tax"
-        description="Configure tax rates and view tax reports."
-      />
+      <PageHeader title="Tax" description="Configure tax rates and view tax reports." />
 
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -56,18 +52,11 @@ export default function TaxPage() {
         <>
           <Card>
             <CardContent className="p-5">
-              <label className="block text-sm font-medium text-neutral-700 mb-2">
-                Tax Rate (%)
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={taxRate}
+              <label className="block text-sm font-medium text-navy mb-2">Tax Rate (%)</label>
+              <input type="number" step="0.01" min="0" value={taxRate}
                 onChange={(e) => setTaxRate(Number(e.target.value))}
-                className="w-full sm:w-40 rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-              />
-              <p className="text-xs text-neutral-500 mt-2">
+                className="w-full sm:w-40 rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale" />
+              <p className="text-xs text-ink-soft mt-2">
                 Applied to finalized invoices. Configure per-country tax rules in Settings.
               </p>
             </CardContent>
@@ -75,26 +64,26 @@ export default function TaxPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Card><CardContent className="p-5">
-              <p className="text-sm text-neutral-500">Taxable Sales</p>
-              <p className="text-2xl font-bold mt-1">${taxableSales.toLocaleString()}</p>
+              <p className="text-sm text-ink-soft">Taxable Sales</p>
+              <p className="text-2xl font-bold mt-1 text-ink">{format(taxableSales)}</p>
             </CardContent></Card>
             <Card><CardContent className="p-5">
-              <p className="text-sm text-neutral-500">Tax Collected</p>
-              <p className="text-2xl font-bold mt-1 text-brand-600">${taxCollected.toFixed(2)}</p>
+              <p className="text-sm text-ink-soft">Tax Collected</p>
+              <p className="text-2xl font-bold mt-1 text-rose-vale">{format(taxCollected)}</p>
             </CardContent></Card>
             <Card><CardContent className="p-5">
-              <p className="text-sm text-neutral-500">This Month</p>
-              <p className="text-2xl font-bold mt-1">${thisMonthTax.toFixed(2)}</p>
-              <p className="text-xs text-neutral-500 mt-1">on ${thisMonthSales.toFixed(2)}</p>
+              <p className="text-sm text-ink-soft">This Month</p>
+              <p className="text-2xl font-bold mt-1 text-ink">{format(thisMonthTax)}</p>
+              <p className="text-xs text-ink-soft mt-1">on {format(thisMonthSales)}</p>
             </CardContent></Card>
           </div>
 
           <Card>
             <CardContent className="p-5 flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+              <AlertTriangle className="w-5 h-5 text-warning flex-shrink-0 mt-0.5" />
               <div>
-                <p className="font-medium text-sm">Tax compliance reminder</p>
-                <p className="text-sm text-neutral-500 mt-1">
+                <p className="font-medium text-sm text-ink">Tax compliance reminder</p>
+                <p className="text-sm text-ink-soft mt-1">
                   Biz44 helps you track and estimate taxes. Always confirm rates and filing
                   requirements with your local tax authority or accountant.
                 </p>

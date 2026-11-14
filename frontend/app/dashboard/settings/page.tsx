@@ -6,6 +6,8 @@ import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Skeleton from "@/components/ui/Skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { useAuth } from "@/hooks/useAuth";
+import { CURRENCY_CODES } from "@/lib/currency";
 
 interface Company {
   id: string;
@@ -28,6 +30,7 @@ const TABS = [
 ];
 
 export default function SettingsPage() {
+  const { refreshUser } = useAuth();
   const [company, setCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -52,29 +55,41 @@ export default function SettingsPage() {
         method: "PUT",
         body: JSON.stringify(company),
       });
+      await refreshUser();
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
-    } catch (err) { console.error(err); }
-    finally { setSaving(false); }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
   };
 
-  if (loading) return <div className="p-6"><Skeleton className="h-64" /></div>;
+  if (loading) {
+    return (
+      <div className="p-6">
+        <Skeleton className="h-64" />
+      </div>
+    );
+  }
   if (!company) return null;
 
   return (
     <div className="space-y-6 max-w-4xl">
-      <PageHeader title="Settings" description="Manage your business configuration." />
+      <PageHeader
+        title="Settings"
+        description="Manage your business configuration."
+      />
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-neutral-200 overflow-x-auto">
+      <div className="flex gap-1 border-b border-border-soft overflow-x-auto">
         {TABS.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition ${
               tab === t.key
-                ? "border-brand-600 text-brand-700"
-                : "border-transparent text-neutral-500 hover:text-neutral-800"
+                ? "border-rose-vale text-rose-vale"
+                : "border-transparent text-ink-soft hover:text-navy"
             }`}
           >
             {t.label}
@@ -84,20 +99,31 @@ export default function SettingsPage() {
 
       {tab === "business" && (
         <Card>
-          <CardHeader><CardTitle>Business Information</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Business Information</CardTitle>
+          </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Business name</label>
-              <input value={company.name}
+              <label className="block text-sm font-medium mb-1 text-navy">
+                Business name
+              </label>
+              <input
+                value={company.name}
                 onChange={(e) => setCompany({ ...company, name: e.target.value })}
-                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" />
+                className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale focus:border-rose-vale"
+              />
             </div>
+
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Business type</label>
-                <select value={company.businessType || "other"}
+                <label className="block text-sm font-medium mb-1 text-navy">
+                  Business type
+                </label>
+                <select
+                  value={company.businessType || "other"}
                   onChange={(e) => setCompany({ ...company, businessType: e.target.value })}
-                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm bg-white">
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                >
                   <option value="retail">Retail</option>
                   <option value="services">Services</option>
                   <option value="manufacturing">Manufacturing</option>
@@ -109,36 +135,58 @@ export default function SettingsPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Industry</label>
-                <input value={company.industry || ""}
+                <label className="block text-sm font-medium mb-1 text-navy">
+                  Industry
+                </label>
+                <input
+                  value={company.industry || ""}
                   onChange={(e) => setCompany({ ...company, industry: e.target.value })}
-                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" />
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                />
               </div>
             </div>
+
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Email</label>
-                <input type="email" value={company.email || ""}
+                <label className="block text-sm font-medium mb-1 text-navy">
+                  Email
+                </label>
+                <input
+                  type="email"
+                  value={company.email || ""}
                   onChange={(e) => setCompany({ ...company, email: e.target.value })}
-                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" />
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Phone</label>
-                <input value={company.phone || ""}
+                <label className="block text-sm font-medium mb-1 text-navy">
+                  Phone
+                </label>
+                <input
+                  value={company.phone || ""}
                   onChange={(e) => setCompany({ ...company, phone: e.target.value })}
-                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" />
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                />
               </div>
             </div>
+
             <div>
-              <label className="block text-sm font-medium mb-1">Address</label>
-              <textarea rows={3} value={company.address || ""}
+              <label className="block text-sm font-medium mb-1 text-navy">
+                Address
+              </label>
+              <textarea
+                rows={3}
+                value={company.address || ""}
                 onChange={(e) => setCompany({ ...company, address: e.target.value })}
-                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" />
+                className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+              />
             </div>
 
             <div className="flex items-center gap-3 pt-2">
-              <Button onClick={save} isLoading={saving}>Save Changes</Button>
-              {saved && <span className="text-sm text-emerald-600">Saved!</span>}
+              <Button onClick={save} isLoading={saving}>
+                Save Changes
+              </Button>
+              {saved && <span className="text-sm text-success">Saved!</span>}
             </div>
           </CardContent>
         </Card>
@@ -146,29 +194,47 @@ export default function SettingsPage() {
 
       {tab === "localization" && (
         <Card>
-          <CardHeader><CardTitle>Currency & Localization</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Currency &amp; Localization</CardTitle>
+          </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Country</label>
-                <input value={company.country || ""}
+                <label className="block text-sm font-medium mb-1 text-navy">
+                  Country
+                </label>
+                <input
+                  value={company.country || ""}
                   onChange={(e) => setCompany({ ...company, country: e.target.value })}
-                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" />
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Currency</label>
-                <select value={company.currency || "USD"}
+                <label className="block text-sm font-medium mb-1 text-navy">
+                  Currency
+                </label>
+                <select
+                  value={company.currency || "USD"}
                   onChange={(e) => setCompany({ ...company, currency: e.target.value })}
-                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm bg-white">
-                  {["USD", "EUR", "GBP", "NGN", "KES", "GHS", "ZAR", "INR"].map((c) => (
-                    <option key={c} value={c}>{c}</option>
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-rose-vale"
+                >
+                  {CURRENCY_CODES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
                   ))}
                 </select>
+                <p className="text-xs text-ink-soft mt-1">
+                  Changes how amounts are displayed across the entire app.
+                </p>
               </div>
             </div>
+
             <div className="flex items-center gap-3 pt-2">
-              <Button onClick={save} isLoading={saving}>Save Changes</Button>
-              {saved && <span className="text-sm text-emerald-600">Saved!</span>}
+              <Button onClick={save} isLoading={saving}>
+                Save Changes
+              </Button>
+              {saved && <span className="text-sm text-success">Saved!</span>}
             </div>
           </CardContent>
         </Card>
@@ -176,9 +242,11 @@ export default function SettingsPage() {
 
       {tab === "notifications" && (
         <Card>
-          <CardHeader><CardTitle>Notifications</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Notifications</CardTitle>
+          </CardHeader>
           <CardContent>
-            <p className="text-sm text-neutral-500">
+            <p className="text-sm text-ink-soft">
               Notification preferences will appear here as new features roll out.
             </p>
           </CardContent>
@@ -187,9 +255,11 @@ export default function SettingsPage() {
 
       {tab === "security" && (
         <Card>
-          <CardHeader><CardTitle>Security</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Security</CardTitle>
+          </CardHeader>
           <CardContent>
-            <p className="text-sm text-neutral-500">
+            <p className="text-sm text-ink-soft">
               Your account is secured with JWT authentication and bcrypt password hashing.
             </p>
           </CardContent>

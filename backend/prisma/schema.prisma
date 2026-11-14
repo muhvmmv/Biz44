@@ -18,6 +18,7 @@ model User {
   role      String   @default("admin")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  locationAccess UserLocationAccess[]
 
   @@map("users")
 }
@@ -31,6 +32,7 @@ model Company {
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   users          User[]
+  purchases Purchase[]
   customers      Customer[]
   suppliers      Supplier[]
   employees      Employee[]
@@ -44,6 +46,9 @@ model Company {
   attendance     Attendance[]
   reportNotes ReportNote[]
   leaves         Leave[]
+  batches InventoryBatch[]
+  locations Location[]
+  purchasePayments PurchasePayment[]
   businessType        String?
   industry            String?
   country             String?
@@ -72,6 +77,8 @@ model Supplier {
   id        String   @id @default(uuid())
   companyId String
   company   Company  @relation(fields: [companyId], references: [id])
+  purchases Purchase[]
+  batches InventoryBatch[]
   name      String
   email     String?
   phone     String?
@@ -111,20 +118,65 @@ model Product {
   description    String?
   price          Float           @default(0)
   cost           Float           @default(0)
+  totalCostValue Float           @default(0)
   quantity       Int             @default(0)
   reorderPoint   Int             @default(0)
   invoiceItems   InvoiceItem[]
   stockMovements StockMovement[]
+  purchaseItems  PurchaseItem[]
+  batches        InventoryBatch[]
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
   @@map("products")
 }
 
+model Purchase {
+  id         String            @id @default(uuid())
+  companyId  String
+  company    Company           @relation(fields: [companyId], references: [id])
+  locationId String?
+  location   Location?         @relation(fields: [locationId], references: [id])
+  supplierId String?
+  supplier   Supplier?         @relation(fields: [supplierId], references: [id])
+  reference  String?
+  date       DateTime          @default(now())
+  dueDate    DateTime?
+  subtotal   Float             @default(0)
+  total      Float             @default(0)
+  amountPaid Float             @default(0)
+  status     String            @default("unpaid")
+  notes      String?
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  items      PurchaseItem[]
+  batches    InventoryBatch[]
+  payments   PurchasePayment[]
+
+  @@index([companyId, status])
+  @@index([companyId, locationId])
+  @@map("purchases")
+}
+
+model PurchaseItem {
+  id         String   @id @default(uuid())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+  quantity   Int
+  unitCost   Float
+  total      Float
+
+  @@map("purchase_items")
+}
+
 model Invoice {
   id            String    @id @default(uuid())
   companyId     String
   company       Company   @relation(fields: [companyId], references: [id])
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
   customerId    String?
   customer      Customer? @relation(fields: [customerId], references: [id])
   customerName    String?
@@ -145,7 +197,8 @@ model Invoice {
   updatedAt     DateTime  @updatedAt
   items         InvoiceItem[]
   payments      Payment[]
-
+ 
+  @@index([companyId, locationId])
   @@map("invoices")
 }
 
@@ -167,6 +220,8 @@ model Payment {
   id        String   @id @default(uuid())
   companyId String
   company   Company  @relation(fields: [companyId], references: [id])
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
   invoiceId String?
   invoice   Invoice? @relation(fields: [invoiceId], references: [id])
   amount    Float
@@ -175,8 +230,10 @@ model Payment {
   notes     String?
   paidAt    DateTime @default(now())
   createdAt DateTime @default(now())
+ 
 
   @@map("payments")
+  @@index([companyId, locationId])
 }
 
 model Account {
@@ -197,6 +254,8 @@ model Transaction {
   id          String   @id @default(uuid())
   companyId   String
   company     Company  @relation(fields: [companyId], references: [id])
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
   accountId   String
   account     Account  @relation(fields: [accountId], references: [id])
   type        String
@@ -204,30 +263,74 @@ model Transaction {
   amount      Float
   date        DateTime @default(now())
   createdAt   DateTime @default(now())
+  
 
   @@map("transactions")
+  @@index([companyId, locationId])
 }
 
 model StockMovement {
-  id        String   @id @default(uuid())
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-  productId String
-  product   Product  @relation(fields: [productId], references: [id])
-  type      String
-  quantity  Int
-  balance   Int
-  reference String?
-  notes     String?
-  createdAt DateTime @default(now())
+  id         String   @id @default(uuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id])
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+  batchId    String?
+  batch      InventoryBatch? @relation(fields: [batchId], references: [id])
+  type       String
+  quantity   Int
+  balance    Int
+  unitCost   Float    @default(0)
+  totalCost  Float    @default(0)
+  reference  String?
+  notes      String?
+  createdAt  DateTime @default(now())
+  
 
+  @@index([productId, createdAt])
+  @@index([reference])
   @@map("stock_movements")
+  @@index([companyId, locationId])
+}
+
+model InventoryBatch {
+  id                   String          @id @default(uuid())
+  companyId            String
+  company              Company         @relation(fields: [companyId], references: [id])
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
+  productId            String
+  product              Product         @relation(fields: [productId], references: [id])
+  supplierId           String?
+  supplier             Supplier?       @relation(fields: [supplierId], references: [id])
+  purchaseId           String?
+  purchase             Purchase?       @relation(fields: [purchaseId], references: [id])
+  quantityReceived     Int
+  quantityRemaining    Int
+  unitCost             Float
+  sellingPriceSnapshot Float           @default(0)
+  reference            String?
+  receivedAt           DateTime        @default(now())
+  isLegacy             Boolean         @default(false)
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  stockMovements       StockMovement[]
+  
+
+  @@index([productId, receivedAt])
+  @@index([productId, quantityRemaining])
+  @@index([companyId, createdAt])
+  @@map("inventory_batches")
 }
 
 model Payroll {
   id         String    @id @default(uuid())
   companyId  String
   company    Company   @relation(fields: [companyId], references: [id])
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
   employeeId String
   employee   Employee  @relation(fields: [employeeId], references: [id])
   period     String
@@ -244,35 +347,40 @@ model Payroll {
 }
 
 model Attendance {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   companyId  String
-  company    Company  @relation(fields: [companyId], references: [id])
+  company    Company   @relation(fields: [companyId], references: [id])
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
   employeeId String
-  employee   Employee @relation(fields: [employeeId], references: [id])
+  employee   Employee  @relation(fields: [employeeId], references: [id])
   date       DateTime
   status     String
   notes      String?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime  @default(now())
 
   @@map("attendance")
 }
 
 model Leave {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   companyId  String
-  company    Company  @relation(fields: [companyId], references: [id])
+  company    Company   @relation(fields: [companyId], references: [id])
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
   employeeId String
-  employee   Employee @relation(fields: [employeeId], references: [id])
+  employee   Employee  @relation(fields: [employeeId], references: [id])
   type       String
   startDate  DateTime
   endDate    DateTime
   reason     String?
-  status     String   @default("pending")
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  status     String    @default("pending")
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   @@map("leaves")
 }
+
 model ReportNote {
   id        String   @id @default(uuid())
   companyId String
@@ -285,4 +393,67 @@ model ReportNote {
   updatedAt DateTime @updatedAt
 
   @@map("report_notes")
+}
+model Location {
+  id         String   @id @default(uuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id])
+  name       String
+  city       String?
+  address    String?
+  phone      String?
+  email      String?
+  status     String   @default("active") // active | inactive
+  isDefault  Boolean  @default(false)    // set true for the auto-created "Main" location
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  userAccess      UserLocationAccess[]
+  invoices        Invoice[]
+  payments        Payment[]
+  transactions    Transaction[]
+  stockMovements  StockMovement[]
+  purchases       Purchase[]
+  batches         InventoryBatch[]
+  attendance      Attendance[]
+  leaves          Leave[]
+  payrolls        Payroll[]
+  purchasePayments PurchasePayment[]
+
+  @@index([companyId, status])
+  @@map("locations")
+}
+
+model UserLocationAccess {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, locationId])
+  @@index([userId])
+  @@index([locationId])
+  @@map("user_location_access")
+}
+
+model PurchasePayment {
+  id         String    @id @default(uuid())
+  companyId  String
+  company    Company   @relation(fields: [companyId], references: [id])
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
+  purchaseId String
+  purchase   Purchase  @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  amount     Float
+  method     String    @default("cash")
+  account    String    @default("Cash")
+  reference  String?
+  notes      String?
+  paidAt     DateTime  @default(now())
+  createdAt  DateTime  @default(now())
+
+  @@index([purchaseId])
+  @@index([companyId, paidAt])
+  @@map("purchase_payments")
 }

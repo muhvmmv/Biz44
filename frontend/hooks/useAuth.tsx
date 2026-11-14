@@ -1,12 +1,7 @@
 "use client";
 
 import {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  useCallback,
-  ReactNode,
+  createContext, useContext, useState, useEffect, useCallback, ReactNode,
 } from "react";
 import { apiFetch } from "@/lib/api";
 
@@ -17,7 +12,8 @@ interface User {
   lastName: string;
   role: string;
   companyId: string;
-  businessType?: string | null;  
+  businessType?: string | null;
+  currency?: string;
 }
 
 interface AuthContextType {
@@ -26,6 +22,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   register: (data: RegisterData) => Promise<void>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
 }
 
 interface RegisterData {
@@ -42,43 +39,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      // defer state update to avoid synchronous setState in effect
-      Promise.resolve().then(() => setLoading(false));
-      return;
+  const fetchMe = useCallback(async () => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    if (!token) return null;
+    try {
+      const res = await apiFetch<{ success: boolean; data: User }>("/auth/me");
+      return res.success ? res.data : null;
+    } catch {
+      return null;
     }
-    apiFetch<{ success: boolean; data: User }>("/auth/me")
-      .then((res) => {
-        if (res.success) setUser(res.data);
-      })
-      .catch(() => {
-        localStorage.removeItem("token");
-      })
-      .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const me = await fetchMe();
+      if (active) {
+        setUser(me);
+        setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [fetchMe]);
 
   const login = useCallback(async (email: string, password: string) => {
-    const res = await apiFetch<{
-      success: boolean;
-      data: { user: User; token: string };
-    }>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    });
+    const res = await apiFetch<{ success: boolean; data: { user: User; token: string } }>(
+      "/auth/login",
+      { method: "POST", body: JSON.stringify({ email, password }) }
+    );
     localStorage.setItem("token", res.data.token);
-    setUser(res.data.user);
-  }, []);
+    const me = await fetchMe();
+    setUser(me || res.data.user);
+  }, [fetchMe]);
 
   const register = useCallback(async (data: RegisterData) => {
-    const res = await apiFetch<{
-      success: boolean;
-      data: { user: User; token: string };
-    }>("/auth/register", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
+    const res = await apiFetch<{ success: boolean; data: { user: User; token: string } }>(
+      "/auth/register",
+      { method: "POST", body: JSON.stringify(data) }
+    );
     localStorage.setItem("token", res.data.token);
     setUser(res.data.user);
   }, []);
@@ -88,15 +86,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    const me = await fetchMe();
+    if (me) setUser(me);
+  }, [fetchMe]);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
 export function useAuth() {
-  const context = useContext(AuthContext);
-  if (!context) throw new Error("useAuth must be used within an AuthProvider");
-  return context;
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
+  return ctx;
 }

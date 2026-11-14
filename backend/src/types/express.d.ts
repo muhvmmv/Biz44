@@ -9,6 +9,10 @@ declare global {
         role: string;
         companyId: string;
       };
+      /** Set by resolveLocation: undefined = "all accessible" scope */
+      locationId?: string;
+      /** Locations this user may query */
+      allowedLocationIds: string[];
     }
   }
 }

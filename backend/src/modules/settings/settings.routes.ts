@@ -7,7 +7,6 @@ const router = Router();
 
 router.use(authenticate);
 
-// ---------- GET company settings ----------
 router.get('/company', async (req, res, next) => {
   try {
     const company = await prisma.company.findUnique({
@@ -17,25 +16,31 @@ router.get('/company', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ---------- UPDATE company settings ----------
 router.put('/company', async (req, res, next) => {
   try {
     const {
       name, email, phone, address,
       businessType, industry, country, currency, teamSize,
     } = req.body;
+
     const company = await prisma.company.update({
       where: { id: req.user?.companyId },
       data: {
-        name, email, phone, address,
-        businessType, industry, country, currency, teamSize,
+        name,
+        email,
+        phone,
+        address,
+        businessType,
+        industry,
+        country,
+        currency,
+        teamSize,
       },
     });
     res.json({ success: true, data: company });
   } catch (err) { next(err); }
 });
 
-// ---------- ONBOARDING STATUS ----------
 router.get('/onboarding', async (req, res, next) => {
   try {
     const company = await prisma.company.findUnique({
@@ -49,7 +54,6 @@ router.get('/onboarding', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ---------- COMPLETE ONBOARDING ----------
 router.post('/onboarding', async (req, res, next) => {
   try {
     const { businessType, industry, country, currency, teamSize, phone, address } = req.body;

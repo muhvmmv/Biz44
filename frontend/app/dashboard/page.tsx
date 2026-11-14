@@ -6,22 +6,29 @@ import { apiFetch } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
-import PageHeader from "@/components/ui/PageHeader";
 import Skeleton from "@/components/ui/Skeleton";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
-  PieChart, Pie, Cell,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Legend, PieChart, Pie, Cell, LabelList,
 } from "recharts";
 import {
   ArrowUpRight, ArrowDownRight, AlertTriangle, Package, Users,
-  DollarSign, TrendingUp, Plus, Receipt,
+  DollarSign, TrendingUp, Plus, Receipt, ShoppingCart,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { useCurrency } from "@/hooks/useCurrency";
+import { useLocationVersion } from "@/hooks/useLocationRefetch";
 import { getBusinessConfig } from "@/lib/business-config";
 
 interface DashboardSummary {
   revenue: number;
   revenueChange: number;
+  cogs: number;
+  grossProfit: number;
+  grossMargin: number;
+  opex: number;
+  netProfit: number;
+  netMargin: number;
   profit: number;
   profitMargin: number;
   expenses: number;
@@ -36,6 +43,10 @@ interface DashboardSummary {
   dueToday: number;
   expectedToday: number;
   topProducts: { name: string; total: number }[];
+  supplierOutstanding: number;
+  supplierUnpaidCount: number;
+  supplierOverdueAmount: number;
+  supplierOverdueCount: number;
 }
 
 interface RecentInvoice {
@@ -46,28 +57,59 @@ interface RecentInvoice {
   customer?: { firstName: string; lastName: string } | null;
 }
 
-// Fixed semantic colors — never randomize
-const COLORS = {
-  revenue: "#3b82f6",   // blue
-  profit: "#10b981",    // green
-  expenses: "#f97316",  // orange
+const CHART = {
+  revenue: "#AB6B73",
+  profit: "#4F8068",
+  loss: "#B94A48",
+  expenses: "#F97316",
 };
 
-const PIE_COLORS = ["#3b82f6", "#10b981", "#f97316", "#8b5cf6", "#ec4899"];
+const PIE_COLORS = ["#AB6B73", "#243447", "#527A9E", "#4F8068", "#C49A52", "#B96F5D"];
+
+function formatCompact(value: number, currency: string): string {
+  const symbol =
+    currency === "NGN" ? "₦" :
+    currency === "USD" ? "$" :
+    currency === "EUR" ? "€" :
+    currency === "GBP" ? "£" :
+    currency === "KES" ? "KSh" :
+    currency === "GHS" ? "₵" :
+    currency === "ZAR" ? "R" :
+    currency === "INR" ? "₹" : "";
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000_000) return `${symbol}${(value / 1_000_000_000).toFixed(1)}B`;
+  if (abs >= 1_000_000) return `${symbol}${(value / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${symbol}${(value / 1_000).toFixed(0)}k`;
+  return `${symbol}${value.toFixed(0)}`;
+}
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const { format, currency } = useCurrency();
+  const version = useLocationVersion();
   const config = getBusinessConfig(user?.businessType);
+
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [chartData, setChartData] = useState<{ month: string; revenue: number; profit: number; expenses: number }[]>([]);
-  const [range, setRange] = useState(6);
+  const [chartData, setChartData] = useState<{
+    month: string;
+    revenue: number;
+    cogs: number;
+    opex: number;
+    grossProfit: number;
+    netProfit: number;
+  }[]>([]);
+  const [range, setRange] = useState(12);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
+    setLoading(true);
+
     Promise.all([
       apiFetch<{ success: boolean; data: DashboardSummary }>("/dashboard/summary"),
-      apiFetch<{ success: boolean; data: typeof chartData }>(`/dashboard/monthly-chart?months=${range}`),
+      apiFetch<{ success: boolean; data: typeof chartData }>(
+        `/dashboard/monthly-chart?months=${range}`
+      ),
     ])
       .then(([s, c]) => {
         if (!active) return;
@@ -75,104 +117,167 @@ export default function DashboardPage() {
         setChartData(c.data);
       })
       .catch(console.error)
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [range]);
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [range, version]);
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={`Good ${getGreeting()}, ${user?.firstName || ""}`}
-        description={`Here's what's happening with your ${config.label.toLowerCase()} business.`}
-        actions={
-          <div className="flex gap-2">
-            <select
-              value={range}
-              onChange={(e) => setRange(Number(e.target.value))}
-              className="border border-neutral-300 rounded-lg px-3 py-2 text-sm bg-white"
-            >
-              <option value={1}>This month</option>
-              <option value={3}>Last 3 months</option>
-              <option value={6}>Last 6 months</option>
-              <option value={12}>Last 12 months</option>
-            </select>
-            <Link href="/dashboard/invoices/new">
-              <Button>
-                <Plus className="w-4 h-4 mr-1" /> Create Invoice
-              </Button>
-            </Link>
-          </div>
-        }
-      />
+      {/* HEADER */}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-ink">
+            Good {getGreeting()}, {user?.firstName || "there"}
+          </h1>
+          <p className="text-ink-soft mt-1 text-sm">
+            Here&apos;s what&apos;s happening with your {config.label.toLowerCase()} business.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <select
+            value={range}
+            onChange={(e) => setRange(Number(e.target.value))}
+            className="border border-border-soft rounded-lg px-3 py-2 text-sm bg-white text-navy focus:outline-none focus:ring-2 focus:ring-rose-vale"
+          >
+            <option value={1}>This month</option>
+            <option value={3}>Last 3 months</option>
+            <option value={6}>Last 6 months</option>
+            <option value={12}>Last 12 months</option>
+          </select>
+          <Link href="/dashboard/invoices/new">
+            <Button>
+              <Plus className="w-4 h-4 mr-1" /> Create Invoice
+            </Button>
+          </Link>
+        </div>
+      </div>
 
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-32" />)}
+          {[...Array(4)].map((_, i) => (
+            <Skeleton key={i} className="h-32" />
+          ))}
         </div>
       ) : summary ? (
         <>
+          {/* KPI CARDS */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <KpiCard
               title="Revenue"
-              value={`$${summary.revenue.toLocaleString()}`}
+              value={format(summary.revenue)}
               change={`${summary.revenueChange >= 0 ? "+" : ""}${summary.revenueChange.toFixed(1)}% vs last month`}
               trend={summary.revenueChange >= 0 ? "up" : "down"}
               icon={<DollarSign className="w-5 h-5" />}
+              accent="rose"
               href="/dashboard/reports"
             />
             <KpiCard
-              title="Profit"
-              value={`$${summary.profit.toLocaleString()}`}
-              change={`${summary.profitMargin.toFixed(1)}% margin`}
-              trend={summary.profit >= 0 ? "up" : "down"}
+              title="Gross Profit"
+              value={format(summary.grossProfit)}
+              change={`${summary.grossMargin.toFixed(1)}% gross margin`}
+              trend={summary.grossProfit >= 0 ? "up" : "down"}
               icon={<TrendingUp className="w-5 h-5" />}
+              accent="navy"
               href="/dashboard/accounting/profit-loss"
             />
             <KpiCard
-              title="Cash Flow"
-              value={`${summary.netCash >= 0 ? "+" : ""}$${summary.netCash.toLocaleString()}`}
-              change="Net cash"
-              trend={summary.netCash >= 0 ? "up" : "down"}
-              icon={<DollarSign className="w-5 h-5" />}
-              href="/dashboard/accounting/accounts"
+              title="Net Profit"
+              value={format(summary.netProfit)}
+              change={`${summary.netMargin.toFixed(1)}% net margin`}
+              trend={summary.netProfit >= 0 ? "up" : "down"}
+              icon={<TrendingUp className="w-5 h-5" />}
+              accent={summary.netProfit >= 0 ? "green" : "terracotta"}
+              href="/dashboard/accounting/profit-loss"
             />
             <KpiCard
               title="Outstanding"
-              value={`$${summary.outstanding.toLocaleString()}`}
+              value={format(summary.outstanding)}
               change={`${summary.unpaidCount} unpaid`}
               trend="down"
               icon={<Receipt className="w-5 h-5" />}
+              accent="terracotta"
               href="/dashboard/accounting/receivable"
             />
           </div>
 
+          {/* CHARTS */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <Card className="lg:col-span-2">
-              <CardHeader><CardTitle>Sales, Profit & Expenses</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle>Sales, Profit &amp; Expenses</CardTitle>
+              </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={320}>
-                  <BarChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis dataKey="month" fontSize={12} />
-                    <YAxis fontSize={12} />
+                <ResponsiveContainer width="100%" height={340}>
+                  <BarChart
+                    data={chartData}
+                    margin={{ top: 28, right: 12, left: 4, bottom: 4 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5DFDC" />
+                    <XAxis dataKey="month" fontSize={12} stroke="#6B6563" />
+                    <YAxis
+                      fontSize={12}
+                      stroke="#6B6563"
+                      domain={[0, (dataMax: number) => dataMax * 1.18]}
+                    />
                     <Tooltip
-                      contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb" }}
-                     formatter={(value) => `$${Number(value).toLocaleString()}`}
+                      contentStyle={{
+                        borderRadius: 8,
+                        border: "1px solid #E5DFDC",
+                        background: "#fff",
+                      }}
+                      formatter={(value) => format(Number(value))}
                     />
                     <Legend />
-                    <Bar dataKey="revenue" fill={COLORS.revenue} radius={[6, 6, 0, 0]} name="Revenue" />
-                    <Bar dataKey="profit" fill={COLORS.profit} radius={[6, 6, 0, 0]} name="Profit" />
-                    <Bar dataKey="expenses" fill={COLORS.expenses} radius={[6, 6, 0, 0]} name="Expenses" />
+
+                    <Bar dataKey="revenue" fill={CHART.revenue} radius={[6, 6, 0, 0]} name="Revenue">
+                      <LabelList
+                        dataKey="revenue"
+                        position="top"
+                        formatter={(v: number) => formatCompact(v, currency)}
+                        style={{ fontSize: 10, fill: "#6B6563", fontWeight: 600 }}
+                      />
+                    </Bar>
+
+                    <Bar dataKey="netProfit" radius={[6, 6, 0, 0]} name="Net Profit">
+                      {chartData.map((entry, i) => (
+                        <Cell
+                          key={i}
+                          fill={entry.netProfit >= 0 ? CHART.profit : CHART.loss}
+                        />
+                      ))}
+                      <LabelList
+                        dataKey="netProfit"
+                        position="top"
+                        formatter={(v: number) => formatCompact(v, currency)}
+                        style={{ fontSize: 10, fill: "#6B6563", fontWeight: 600 }}
+                      />
+                    </Bar>
+
+                    <Bar dataKey="opex" fill={CHART.expenses} radius={[6, 6, 0, 0]} name="Expenses">
+                      <LabelList
+                        dataKey="opex"
+                        position="top"
+                        formatter={(v: number) => formatCompact(v, currency)}
+                        style={{ fontSize: 10, fill: "#6B6563", fontWeight: 600 }}
+                      />
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader><CardTitle>Top Products</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle>Top Products</CardTitle>
+              </CardHeader>
               <CardContent>
                 {summary.topProducts.length === 0 ? (
-                  <p className="text-center text-neutral-400 py-12 text-sm">No sales yet</p>
+                  <p className="text-center text-ink-soft py-12 text-sm">No sales yet</p>
                 ) : (
                   <ResponsiveContainer width="100%" height={300}>
                     <PieChart>
@@ -189,7 +294,7 @@ export default function DashboardPage() {
                           <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                         ))}
                       </Pie>
-                     <Tooltip formatter={(value) => `$${Number(value).toLocaleString()}`} />
+                      <Tooltip formatter={(v) => format(Number(v))} />
                     </PieChart>
                   </ResponsiveContainer>
                 )}
@@ -197,19 +302,43 @@ export default function DashboardPage() {
             </Card>
           </div>
 
+          {/* NEEDS ATTENTION — now 4 columns including supplier outstanding */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-amber-500" />
+                <AlertTriangle className="w-5 h-5 text-warning" />
                 Needs Attention
               </CardTitle>
             </CardHeader>
-            <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <AttentionItem
                 label="Overdue invoices"
                 value={summary.overdueCount || "All clear"}
                 variant={summary.overdueCount > 0 ? "danger" : "success"}
                 href="/dashboard/accounting/receivable"
+              />
+              <AttentionItem
+                label="Supplier payments due"
+                value={
+                  summary.supplierOverdueCount > 0
+                    ? `${summary.supplierOverdueCount} overdue`
+                    : summary.supplierUnpaidCount > 0
+                    ? `${summary.supplierUnpaidCount} unpaid`
+                    : "All clear"
+                }
+                variant={
+                  summary.supplierOverdueCount > 0
+                    ? "danger"
+                    : summary.supplierUnpaidCount > 0
+                    ? "warning"
+                    : "success"
+                }
+                href="/dashboard/purchases?status=unpaid"
+                sublabel={
+                  summary.supplierOutstanding > 0
+                    ? format(summary.supplierOutstanding)
+                    : undefined
+                }
               />
               <AttentionItem
                 label="Low stock products"
@@ -218,7 +347,7 @@ export default function DashboardPage() {
                 href="/dashboard/inventory/products"
               />
               <AttentionItem
-                label={`Due today — $${summary.expectedToday.toFixed(2)}`}
+                label={`Due today — ${format(summary.expectedToday)}`}
                 value={summary.dueToday || "None"}
                 variant={summary.dueToday > 0 ? "info" : "success"}
                 href="/dashboard/invoices"
@@ -226,15 +355,17 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {/* QUICK ACTIONS */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <QuickAction label="New Invoice" icon={<Plus className="w-5 h-5" />} href="/dashboard/invoices/new" />
             <QuickAction label="Add Customer" icon={<Users className="w-5 h-5" />} href="/dashboard/customers" />
             <QuickAction label="Add Product" icon={<Package className="w-5 h-5" />} href="/dashboard/inventory/products" />
+            <QuickAction label="Receive Inventory" icon={<ShoppingCart className="w-5 h-5" />} href="/dashboard/inventory/receive" />
             <QuickAction label="Record Expense" icon={<Receipt className="w-5 h-5" />} href="/dashboard/accounting/expenses" />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <RecentInvoices />
+            <RecentInvoices version={version} format={format} />
             <TopCustomers />
           </div>
         </>
@@ -251,27 +382,40 @@ function getGreeting() {
 }
 
 interface KpiCardProps {
-  title: string; value: string; change: string;
-  trend: "up" | "down"; icon: React.ReactNode; href: string;
+  title: string;
+  value: string;
+  change: string;
+  trend: "up" | "down";
+  icon: React.ReactNode;
+  href: string;
+  accent: "rose" | "navy" | "green" | "terracotta";
 }
 
-function KpiCard({ title, value, change, trend, icon, href }: KpiCardProps) {
+function KpiCard({ title, value, change, trend, icon, href, accent }: KpiCardProps) {
+  const accents = {
+    rose: "bg-rose-light text-rose-vale",
+    navy: "bg-navy-light text-navy",
+    green: "bg-[#E6F0EA] text-success",
+    terracotta: "bg-[#F4E6E2] text-terracotta",
+  };
   return (
     <Link href={href}>
       <Card className="hover:shadow-md transition-shadow cursor-pointer">
         <CardContent className="p-5">
           <div className="flex justify-between items-start">
             <div>
-              <p className="text-sm text-neutral-500">{title}</p>
-              <p className="text-2xl font-bold mt-1">{value}</p>
+              <p className="text-sm text-ink-soft">{title}</p>
+              <p className="text-2xl font-bold mt-1 text-ink">{value}</p>
             </div>
-            <div className="bg-brand-50 p-2 rounded-lg">{icon}</div>
+            <div className={`p-2 rounded-lg ${accents[accent]}`}>{icon}</div>
           </div>
           <div className="flex items-center mt-2">
-            {trend === "up"
-              ? <ArrowUpRight className="w-4 h-4 text-emerald-500" />
-              : <ArrowDownRight className="w-4 h-4 text-red-500" />}
-            <span className={`text-sm ml-1 ${trend === "up" ? "text-emerald-600" : "text-red-600"}`}>
+            {trend === "up" ? (
+              <ArrowUpRight className="w-4 h-4 text-success" />
+            ) : (
+              <ArrowDownRight className="w-4 h-4 text-danger" />
+            )}
+            <span className={`text-sm ml-1 ${trend === "up" ? "text-success" : "text-danger"}`}>
               {change}
             </span>
           </div>
@@ -281,56 +425,102 @@ function KpiCard({ title, value, change, trend, icon, href }: KpiCardProps) {
   );
 }
 
-function QuickAction({ label, icon, href }: { label: string; icon: React.ReactNode; href: string }) {
+function QuickAction({
+  label,
+  icon,
+  href,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  href: string;
+}) {
   return (
-    <Link href={href} className="flex flex-col items-center gap-2 p-4 bg-white rounded-xl border border-neutral-200 hover:border-brand-300 hover:shadow-md transition">
-      <div className="bg-brand-50 p-3 rounded-lg">{icon}</div>
-      <span className="text-sm font-medium">{label}</span>
+    <Link
+      href={href}
+      className="flex flex-col items-center gap-2 p-4 bg-white rounded-xl border border-border-soft hover:border-rose-vale hover:shadow-md transition"
+    >
+      <div className="bg-rose-light p-3 rounded-lg text-rose-vale">{icon}</div>
+      <span className="text-sm font-medium text-ink text-center">{label}</span>
     </Link>
   );
 }
 
 function AttentionItem({
-  label, value, variant, href,
+  label,
+  value,
+  variant,
+  href,
+  sublabel,
 }: {
-  label: string; value: string | number;
-  variant: "success" | "warning" | "danger" | "info"; href: string;
+  label: string;
+  value: string | number;
+  variant: "success" | "warning" | "danger" | "info";
+  href: string;
+  sublabel?: string;
 }) {
   return (
-    <Link href={href} className="flex items-center justify-between rounded-lg border border-neutral-200 p-4 hover:border-brand-300 hover:bg-neutral-50 transition">
-      <span className="text-sm font-medium text-neutral-700">{label}</span>
+    <Link
+      href={href}
+      className="flex items-start justify-between gap-3 rounded-lg border border-border-soft p-4 hover:border-rose-vale hover:bg-ivory transition"
+    >
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-ink truncate">{label}</p>
+        {sublabel && (
+          <p className="text-xs text-ink-soft mt-0.5 truncate">{sublabel}</p>
+        )}
+      </div>
       <Badge variant={variant}>{value}</Badge>
     </Link>
   );
 }
 
-function RecentInvoices() {
+function RecentInvoices({
+  version,
+  format,
+}: {
+  version: number;
+  format: (n: number) => string;
+}) {
   const [invoices, setInvoices] = useState<RecentInvoice[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
     apiFetch<{ success: boolean; data: RecentInvoice[] }>("/dashboard/recent-invoices")
-      .then((r) => { if (active) setInvoices(r.data); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, []);
+      .then((r) => {
+        if (active) setInvoices(r.data);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [version]);
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Recent Invoices</CardTitle>
-        <Link href="/dashboard/invoices"><Button variant="ghost" size="sm">View all</Button></Link>
+        <Link href="/dashboard/invoices">
+          <Button variant="ghost" size="sm">
+            View all
+          </Button>
+        </Link>
       </CardHeader>
       <CardContent>
         {loading ? (
-          <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-10" />)}</div>
+          <div className="space-y-2">
+            {[...Array(3)].map((_, i) => (
+              <Skeleton key={i} className="h-10" />
+            ))}
+          </div>
         ) : invoices.length === 0 ? (
-          <p className="text-neutral-500 text-center py-4 text-sm">No invoices yet</p>
+          <p className="text-ink-soft text-center py-4 text-sm">No invoices yet</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="text-left text-neutral-500">
+              <thead className="text-left text-ink-soft">
                 <tr>
                   <th className="pb-2">Invoice</th>
                   <th className="pb-2">Customer</th>
@@ -340,18 +530,31 @@ function RecentInvoices() {
               </thead>
               <tbody>
                 {invoices.map((inv) => (
-                  <tr key={inv.id} className="border-t">
+                  <tr key={inv.id} className="border-t border-border-soft">
                     <td className="py-2 font-medium">
-                      <Link href={`/dashboard/invoices/${inv.id}`} className="text-brand-700 hover:underline">
+                      <Link
+                        href={`/dashboard/invoices/${inv.id}`}
+                        className="text-rose-vale hover:underline"
+                      >
                         {inv.invoiceNumber}
                       </Link>
                     </td>
-                    <td className="py-2">
-                      {inv.customer ? `${inv.customer.firstName} ${inv.customer.lastName}` : "—"}
+                    <td className="py-2 text-ink-soft">
+                      {inv.customer
+                        ? `${inv.customer.firstName} ${inv.customer.lastName}`
+                        : "—"}
                     </td>
-                    <td className="py-2">${inv.total.toLocaleString()}</td>
+                    <td className="py-2 text-ink">{format(inv.total)}</td>
                     <td className="py-2">
-                      <Badge variant={inv.status === "paid" ? "success" : inv.status === "overdue" ? "danger" : "default"}>
+                      <Badge
+                        variant={
+                          inv.status === "paid"
+                            ? "success"
+                            : inv.status === "overdue"
+                            ? "danger"
+                            : "default"
+                        }
+                      >
                         {inv.status}
                       </Badge>
                     </td>
@@ -371,10 +574,14 @@ function TopCustomers() {
     <Card>
       <CardHeader>
         <CardTitle>Top Customers</CardTitle>
-        <Link href="/dashboard/customers"><Button variant="ghost" size="sm">View all</Button></Link>
+        <Link href="/dashboard/customers">
+          <Button variant="ghost" size="sm">
+            View all
+          </Button>
+        </Link>
       </CardHeader>
       <CardContent>
-        <p className="text-neutral-500 text-center py-8 text-sm">No data available</p>
+        <p className="text-ink-soft text-center py-8 text-sm">No data available</p>
       </CardContent>
     </Card>
   );
