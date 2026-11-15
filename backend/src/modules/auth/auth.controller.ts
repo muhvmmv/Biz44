@@ -31,4 +31,22 @@ export class AuthController {
       next(err);
     }
   }
+
+  async updateMe(req: Request, res: Response, next: NextFunction) {
+    try {
+      const user = await authService.updateProfile(req.user!.id, req.body ?? {});
+      res.json({ success: true, data: user });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async changePassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      await authService.changePassword(req.user!.id, req.body?.currentPassword, req.body?.newPassword);
+      res.json({ success: true });
+    } catch (err) {
+      next(err);
+    }
+  }
 }

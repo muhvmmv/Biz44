@@ -41,6 +41,7 @@ export default function ReceiveInventoryPage() {
     "paid" | "unpaid" | "partially_paid"
   >("paid");
   const [partialAmount, setPartialAmount] = useState(0);
+  const [dueDate, setDueDate] = useState("");
   const [paymentAccountId, setPaymentAccountId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -106,6 +107,7 @@ export default function ReceiveInventoryPage() {
           notes: notes || undefined,
           supplierId: supplierId || undefined,
           paymentStatus,
+          dueDate: paymentStatus !== "paid" && dueDate ? dueDate : undefined,
           amountPaid: paymentStatus === "partially_paid" ? partialAmount : undefined,
           paymentAccountId: paymentStatus === "unpaid" ? undefined : paymentAccountId,
         }),
@@ -299,6 +301,20 @@ export default function ReceiveInventoryPage() {
                     value={partialAmount}
                     onChange={setPartialAmount}
                   />
+                </div>
+              )}
+              {paymentStatus !== "paid" && (
+                <div>
+                  <label className="block text-sm font-medium mb-1 text-charcoal">
+                    Pay supplier by
+                  </label>
+                  <input
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                    className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
+                  />
+                  <p className="text-xs text-ink-soft mt-1">Shown as overdue in Payables and alerts after this date.</p>
                 </div>
               )}
               {paymentStatus !== "unpaid" && (

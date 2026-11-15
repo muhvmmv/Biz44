@@ -46,9 +46,11 @@ const PAYABLE_STATUSES = ['unpaid', 'partially_paid', 'overdue'];
 /**
  * Invoice totals. A discount is given either as an amount or a percentage of
  * the subtotal (body.discountType = 'amount' | 'percent', body.discountValue).
- * Revenue is recorded net of the discount.
+ * Revenue is recorded net of the discount. VAT (body.taxRate, percent, else the
+ * company's VAT rate) is charged on the discounted amount and owed to the tax
+ * authority, so it is never revenue.
  */
-function invoiceTotals(items: { quantity: number; unitPrice: number }[], body: any) {
+function invoiceTotals(items: { quantity: number; unitPrice: number }[], body: any, defaultTaxRate = 0) {
   const subtotal = round2(items.reduce((s, it) => s + it.quantity * it.unitPrice, 0));
   const value = body?.discountValue === undefined || body?.discountValue === '' || body?.discountValue === null ? 0 : Number(body.discountValue);
   if (!Number.isFinite(value) || value < 0) throw badRequest('Discount must be 0 or more');
@@ -56,7 +58,17 @@ function invoiceTotals(items: { quantity: number; unitPrice: number }[], body: a
   if (type === 'percent' && value > 100) throw badRequest('Discount cannot be more than 100%');
   const discountTotal = round2(type === 'percent' ? (subtotal * value) / 100 : value);
   if (discountTotal > subtotal + 0.001) throw badRequest('Discount cannot be more than the invoice subtotal');
-  return { subtotal, discountTotal, total: round2(subtotal - discountTotal) };
+  const rawRate = body?.taxRate === undefined || body?.taxRate === null || body?.taxRate === '' ? defaultTaxRate : Number(body.taxRate);
+  if (!Number.isFinite(rawRate) || rawRate < 0 || rawRate > 100) throw badRequest('VAT rate must be between 0 and 100');
+  const taxRate = round2(rawRate);
+  const net = round2(subtotal - discountTotal);
+  const taxTotal = round2((net * taxRate) / 100);
+  return { subtotal, discountTotal, taxRate, taxTotal, total: round2(net + taxTotal) };
+}
+
+async function companyVatRate(companyId: string) {
+  const c = await prisma.company.findUnique({ where: { id: companyId }, select: { vatRate: true } });
+  return c?.vatRate ?? 0;
 }
 
 /**
@@ -182,7 +194,7 @@ router.post('/', resolveLocation, async (req: Request, res: Response, next: Next
     } = req.body;
     const items = await validateInvoiceInput(companyId, req.body);
 
-    const { subtotal, discountTotal, total } = invoiceTotals(items, req.body);
+    const { subtotal, discountTotal, taxRate, taxTotal, total } = invoiceTotals(items, req.body, await companyVatRate(companyId));
 
     const locationId = requireTargetLocation(req);
 
@@ -205,7 +217,8 @@ router.post('/', resolveLocation, async (req: Request, res: Response, next: Next
             status: 'draft',
             subtotal,
             discountTotal,
-            taxTotal: 0,
+            taxRate,
+            taxTotal,
             total,
             notes,
             dueDate: dueDate ? new Date(dueDate) : null,
@@ -249,7 +262,8 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
     } = req.body;
     const items = await validateInvoiceInput(existing.companyId, req.body);
 
-    const { subtotal, discountTotal, total } = invoiceTotals(items, req.body);
+    // A draft keeps its own rate unless a new one is sent.
+    const { subtotal, discountTotal, taxRate, taxTotal, total } = invoiceTotals(items, req.body, existing.taxRate);
 
     const updated = await prisma.$transaction(async (tx) => {
       await tx.invoiceItem.deleteMany({ where: { invoiceId: existing.id } });
@@ -265,6 +279,8 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
         notes,
         subtotal,
         discountTotal,
+        taxRate,
+        taxTotal,
         total,
         items: {
           create: items.map((it) => ({
@@ -348,6 +364,8 @@ router.post('/:id/finalize', async (req: Request, res: Response, next: NextFunct
       const ar = await systemAccount(tx, companyId, 'ar');
       const sales = await systemAccount(tx, companyId, 'sales');
       const cogs = await systemAccount(tx, companyId, 'cogs');
+      const taxTotal = round2(invoice.taxTotal ?? 0);
+      const vat = taxTotal > 0 ? await systemAccount(tx, companyId, 'vat_payable') : null;
       await postJournal(tx, {
         companyId,
         locationId: invoice.locationId,
@@ -358,7 +376,8 @@ router.post('/:id/finalize', async (req: Request, res: Response, next: NextFunct
         createdById: req.user!.id,
         lines: [
           { accountId: ar.id, debit: invoice.total },
-          { accountId: sales.id, credit: invoice.total },
+          { accountId: sales.id, credit: round2(invoice.total - taxTotal) },
+          ...(vat ? [{ accountId: vat.id, credit: taxTotal }] : []),
           { accountId: cogs.id, debit: totalCogs },
           ...Array.from(costByAccount, ([accountId, amount]) => ({ accountId, credit: amount })),
         ],
@@ -499,6 +518,8 @@ router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunctio
       const ar = await systemAccount(tx, companyId, 'ar');
       const sales = await systemAccount(tx, companyId, 'sales');
       const cogs = await systemAccount(tx, companyId, 'cogs');
+      const taxTotal = round2(invoice.taxTotal ?? 0);
+      const vat = taxTotal > 0 ? await systemAccount(tx, companyId, 'vat_payable') : null;
       await postJournal(tx, {
         companyId,
         locationId: invoice.locationId,
@@ -508,7 +529,8 @@ router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunctio
         reference: invoice.invoiceNumber,
         createdById: req.user!.id,
         lines: [
-          { accountId: sales.id, debit: invoice.total },
+          { accountId: sales.id, debit: round2(invoice.total - taxTotal) },
+          ...(vat ? [{ accountId: vat.id, debit: taxTotal }] : []),
           ...Array.from(restoreByAccount, ([accountId, amount]) => ({ accountId, debit: amount })),
           { accountId: ar.id, credit: outstanding },
           ...(refundNow > 0 ? [{ accountId: refundAccount.id, credit: refundNow }] : []),

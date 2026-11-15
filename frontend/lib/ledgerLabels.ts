@@ -20,4 +20,5 @@ export const SOURCE_LABELS: Record<string, string> = {
   production_output: "Production completed",
   production_writeoff: "Failed production written off",
   stock_reclass: "Item type changed",
+  vat_payment: "VAT paid",
 };

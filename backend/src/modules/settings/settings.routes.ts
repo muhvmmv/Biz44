@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../../middleware/auth';
 
 import { prisma } from '../../lib/prisma';
+import { badRequest } from '../../lib/errors';
 const router = Router();
 
 router.use(authenticate);
@@ -19,8 +20,14 @@ router.put('/company', async (req, res, next) => {
   try {
     const {
       name, email, phone, address,
-      businessType, industry, country, currency, teamSize,
+      businessType, industry, country, currency, teamSize, vatNumber,
     } = req.body;
+    let vatRate: number | undefined;
+    if (req.body.vatRate !== undefined && req.body.vatRate !== null && req.body.vatRate !== '') {
+      vatRate = Number(req.body.vatRate);
+      if (!Number.isFinite(vatRate) || vatRate < 0 || vatRate > 100) throw badRequest('VAT rate must be between 0 and 100');
+      vatRate = Math.round(vatRate * 100) / 100;
+    }
 
     const company = await prisma.company.update({
       where: { id: req.user?.companyId },
@@ -34,6 +41,8 @@ router.put('/company', async (req, res, next) => {
         country,
         currency,
         teamSize,
+        vatRate,
+        vatNumber: vatNumber === undefined ? undefined : vatNumber || null,
       },
     });
     res.json({ success: true, data: company });

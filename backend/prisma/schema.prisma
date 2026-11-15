@@ -60,6 +60,9 @@ model Company {
   industry            String?
   country             String?
   currency            String            @default("USD")
+  /// VAT charged on sales, in percent (0 = not charging VAT).
+  vatRate             Float             @default(0)
+  vatNumber           String?
   teamSize            String?
   onboardingCompleted Boolean           @default(false)
 }
@@ -207,6 +210,8 @@ model Invoice {
   subtotal        Float         @default(0)
   discountTotal   Float         @default(0)
   taxTotal        Float         @default(0)
+  /// VAT rate applied to this invoice, in percent.
+  taxRate         Float         @default(0)
   total           Float         @default(0)
   amountPaid      Float         @default(0)
   notes           String?

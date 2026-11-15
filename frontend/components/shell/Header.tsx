@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  Menu, Search, Plus, Bell, ChevronRight, MapPin, Check, Settings, LogOut, Building2, AlertTriangle, AlertCircle, Info,
+  Menu, Search, Plus, Bell, ChevronRight, MapPin, Check, Settings, LogOut, UserRound, Building2, AlertTriangle, AlertCircle, Info,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { breadcrumbs } from "@/lib/navigation";
@@ -240,6 +240,7 @@ function UserMenu() {
             <p className="truncate text-xs text-ink-soft">{user?.email}</p>
           </div>
           <MenuDivider />
+          <MenuLink href="/dashboard/profile" onSelect={close}><UserRound size={15} /> Your profile</MenuLink>
           <MenuLink href="/dashboard/settings" onSelect={close}><Settings size={15} /> Company settings</MenuLink>
           <MenuLink href="/dashboard/settings/locations" onSelect={close}><MapPin size={15} /> Locations</MenuLink>
           <MenuDivider />

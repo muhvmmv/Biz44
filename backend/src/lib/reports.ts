@@ -205,6 +205,7 @@ const CASH_FLOW_LABELS: Record<string, string> = {
   supplier_return: 'Refunds from suppliers',
   expense: 'Expenses',
   payroll: 'Payroll',
+  vat_payment: 'VAT paid',
   manual: 'Owner and other entries',
 };
 

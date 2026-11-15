@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import PageHeader from "@/components/ui/PageHeader";
+import { ButtonLink } from "@/components/ui/Button";
+import { FileText } from "lucide-react";
 import Skeleton from "@/components/ui/Skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { useCurrency } from "@/hooks/useCurrency";
@@ -75,6 +77,7 @@ export default function SupplierDetailPage() {
       <PageHeader
         title={supplier.name}
         description={`Supplier since ${new Date(supplier.createdAt).toLocaleDateString()}`}
+        actions={<ButtonLink href={`/dashboard/suppliers/${supplier.id}/statement`} variant="outline"><FileText size={16} /> Statement</ButtonLink>}
       />
 
       {/* Summary cards */}

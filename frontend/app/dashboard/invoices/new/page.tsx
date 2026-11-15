@@ -52,6 +52,7 @@ export default function NewInvoicePage() {
   ]);
   const [discountType, setDiscountType] = useState<"amount" | "percent">("amount");
   const [discountValue, setDiscountValue] = useState(0);
+  const [taxRate, setTaxRate] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -63,6 +64,12 @@ export default function NewInvoicePage() {
       setCustomers(c.data);
       setProducts(p.data);
     });
+  }, [version]);
+
+  useEffect(() => {
+    apiFetch<{ success: boolean; data: { vatRate: number } }>("/settings/company")
+      .then((r) => setTaxRate(r.data.vatRate ?? 0))
+      .catch(() => {});
   }, [version]);
 
   const updateItem = (idx: number, updates: Partial<LineItem>) =>
@@ -90,7 +97,8 @@ export default function NewInvoicePage() {
 
   const subtotal = items.reduce((s, it) => s + it.quantity * it.unitPrice, 0);
   const discount = Math.round((discountType === "percent" ? (subtotal * (discountValue || 0)) / 100 : discountValue || 0) * 100) / 100;
-  const total = subtotal - discount;
+  const tax = Math.round(((subtotal - discount) * (taxRate || 0)) / 100 * 100) / 100;
+  const total = subtotal - discount + tax;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,6 +147,7 @@ export default function NewInvoicePage() {
           notes: notes || undefined,
           discountType,
           discountValue: discountValue || 0,
+          taxRate: taxRate || 0,
           items: items.map((it) => ({
             productId: it.productId || null,
             description: it.description,
@@ -399,6 +408,23 @@ export default function NewInvoicePage() {
                   <div className="flex justify-between text-ink-soft">
                     <span>Less discount</span>
                     <span className="tabular-nums">− {format(discount)}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-ink-soft">VAT %</span>
+                  <NumericInput
+                    min={0}
+                    max={100}
+                    value={taxRate}
+                    onChange={setTaxRate}
+                    className="w-28 text-right"
+                    aria-label="VAT rate"
+                  />
+                </div>
+                {tax > 0 && (
+                  <div className="flex justify-between text-ink-soft">
+                    <span>VAT</span>
+                    <span className="tabular-nums">{format(tax)}</span>
                   </div>
                 )}
                 <div className="flex justify-between border-t border-border-soft pt-2 text-lg font-bold text-ink">

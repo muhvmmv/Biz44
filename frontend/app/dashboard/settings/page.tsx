@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -8,6 +9,7 @@ import Skeleton from "@/components/ui/Skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { useAuth } from "@/hooks/useAuth";
 import { CURRENCY_CODES } from "@/lib/currency";
+import NumericInput from "@/components/ui/NumericInput";
 
 interface Company {
   id: string;
@@ -20,11 +22,13 @@ interface Company {
   country: string | null;
   currency: string;
   teamSize: string | null;
+  vatRate: number;
+  vatNumber: string | null;
 }
 
 const TABS = [
   { key: "business", label: "Business" },
-  { key: "localization", label: "Currency & Localization" },
+  { key: "localization", label: "Currency & VAT" },
   { key: "notifications", label: "Notifications" },
   { key: "security", label: "Security" },
 ];
@@ -35,7 +39,10 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [tab, setTab] = useState("business");
+  const [saveError, setSaveError] = useState("");
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const [tab, setTab] = useState(TABS.some((t) => t.key === requestedTab) ? (requestedTab as string) : "business");
 
   useEffect(() => {
     let active = true;
@@ -50,6 +57,7 @@ export default function SettingsPage() {
     if (!company) return;
     setSaving(true);
     setSaved(false);
+    setSaveError("");
     try {
       await apiFetch("/settings/company", {
         method: "PUT",
@@ -58,8 +66,8 @@ export default function SettingsPage() {
       await refreshUser();
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
-    } catch (err) {
-      console.error(err);
+    } catch (err: unknown) {
+      setSaveError(err instanceof Error ? err.message : "Could not save");
     } finally {
       setSaving(false);
     }
@@ -187,6 +195,7 @@ export default function SettingsPage() {
                 Save Changes
               </Button>
               {saved && <span className="text-sm text-success">Saved!</span>}
+              {saveError && <span className="text-sm text-danger" role="alert">{saveError}</span>}
             </div>
           </CardContent>
         </Card>
@@ -195,7 +204,7 @@ export default function SettingsPage() {
       {tab === "localization" && (
         <Card>
           <CardHeader>
-            <CardTitle>Currency &amp; Localization</CardTitle>
+            <CardTitle>Currency &amp; VAT</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid sm:grid-cols-2 gap-4">
@@ -228,6 +237,27 @@ export default function SettingsPage() {
                   Changes how amounts are displayed across the entire app.
                 </p>
               </div>
+              <div>
+                <label className="block text-sm font-medium mb-1 text-charcoal">VAT rate (%)</label>
+                <NumericInput
+                  min={0}
+                  max={100}
+                  value={company.vatRate ?? 0}
+                  onChange={(v) => setCompany({ ...company, vatRate: v })}
+                />
+                <p className="text-xs text-ink-soft mt-1">
+                  Added to new invoices (e.g. 7.5). Use 0 if you don&apos;t charge VAT. Each invoice can change it.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1 text-charcoal">VAT / tax ID</label>
+                <input
+                  value={company.vatNumber || ""}
+                  onChange={(e) => setCompany({ ...company, vatNumber: e.target.value })}
+                  placeholder="Printed on invoices"
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
+                />
+              </div>
             </div>
 
             <div className="flex items-center gap-3 pt-2">
@@ -235,6 +265,7 @@ export default function SettingsPage() {
                 Save Changes
               </Button>
               {saved && <span className="text-sm text-success">Saved!</span>}
+              {saveError && <span className="text-sm text-danger" role="alert">{saveError}</span>}
             </div>
           </CardContent>
         </Card>

@@ -28,6 +28,7 @@ interface Business {
   phone: string | null;
   address: string | null;
   country: string | null;
+  vatNumber?: string | null;
 }
 
 interface Invoice {
@@ -37,6 +38,7 @@ interface Invoice {
   subtotal: number;
   taxTotal: number;
   discountTotal: number;
+  taxRate?: number;
   total: number;
   amountPaid: number;
   notes: string | null;
@@ -320,6 +322,7 @@ export default function InvoiceDetailPage() {
               {businessCountry && <p>{businessCountry}</p>}
               {businessPhone && <p>{businessPhone}</p>}
               {businessEmail && <p>{businessEmail}</p>}
+              {business?.vatNumber && <p>VAT ID: {business.vatNumber}</p>}
             </div>
           </div>
 
@@ -434,7 +437,7 @@ export default function InvoiceDetailPage() {
             )}
             {invoice.taxTotal > 0 && (
               <div className="flex justify-between">
-                <span className="text-ink-soft">Tax</span>
+                <span className="text-ink-soft">VAT{invoice.taxRate ? ` (${invoice.taxRate}%)` : ""}</span>
                 <span className="text-ink">{format(invoice.taxTotal)}</span>
               </div>
             )}

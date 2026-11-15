@@ -4,11 +4,32 @@ import { CrudService, pick } from '../../services/crud.service';
 import { badRequest } from '../../lib/errors';
 
 import { prisma } from '../../lib/prisma';
+import { supplierStatement } from '../../lib/statements';
 import { purchaseBalance } from '../purchases/purchase.service';
 const router = Router();
 const supplierService = new CrudService('supplier');
 
 router.use(authenticate);
+
+/** Parse an optional date; a plain YYYY-MM-DD `to` means the end of that day. */
+function statementDate(value: unknown, endOfDay = false): Date | undefined {
+  if (typeof value !== 'string' || !value) return undefined;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) throw badRequest(`Invalid date: ${value}`);
+  if (endOfDay && /^\d{4}-\d{2}-\d{2}$/.test(value)) d.setHours(23, 59, 59, 999);
+  return d;
+}
+
+// Statement: running balance for a period, aging and open documents.
+router.get('/:id/statement', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = await supplierStatement(
+      req.user!.companyId, req.params.id,
+      statementDate(req.query.from), statementDate(req.query.to, true)
+    );
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+});
 
 // Summary (must come BEFORE /:id)
 router.get('/:id/summary', async (req: Request, res: Response, next: NextFunction) => {

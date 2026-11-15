@@ -4,6 +4,7 @@ import { env } from '../../config/env';
 import { DEFAULT_ACCOUNT_KEYS, SYSTEM_ACCOUNTS } from '../../lib/ledger';
 
 import { prisma } from '../../lib/prisma';
+import { badRequest } from '../../lib/errors';
 
 export interface RegisterInput {
   firstName: string;
@@ -129,6 +130,32 @@ export class AuthService {
     });
     if (!user) throw new Error('User not found');
     return this.sanitizeUser(user);
+  }
+
+  async updateProfile(userId: string, data: { firstName?: unknown; lastName?: unknown }) {
+    const clean = (v: unknown, label: string) => {
+      if (v === undefined) return undefined;
+      const t = typeof v === 'string' ? v.trim() : '';
+      if (!t) throw badRequest(`${label} is required`);
+      if (t.length > 80) throw badRequest(`${label} is too long`);
+      return t;
+    };
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { firstName: clean(data.firstName, 'First name'), lastName: clean(data.lastName, 'Last name') },
+      include: { company: true },
+    });
+    return this.sanitizeUser(user);
+  }
+
+  async changePassword(userId: string, currentPassword: unknown, newPassword: unknown) {
+    if (typeof currentPassword !== 'string' || !currentPassword) throw badRequest('Enter your current password');
+    if (typeof newPassword !== 'string' || newPassword.length < 8) throw badRequest('The new password must be at least 8 characters');
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw badRequest('User not found');
+    if (!(await bcrypt.compare(currentPassword, user.password))) throw badRequest('Your current password is not correct');
+    if (await bcrypt.compare(newPassword, user.password)) throw badRequest('Choose a password different from the current one');
+    await prisma.user.update({ where: { id: userId }, data: { password: await bcrypt.hash(newPassword, 12) } });
   }
 
   private generateToken(user: { id: string; email: string; role: string; companyId: string }) {

@@ -5,6 +5,9 @@ import { prisma } from '../../lib/prisma';
 import { stockByProduct } from '../../lib/inventory';
 import { resolveLocation, reportLocationIds } from '../../middleware/locationAuth';
 import { monthlyPnl, profitAndLoss } from '../../lib/reports';
+import { round2 } from '../../lib/ledger';
+import { badRequest } from '../../lib/errors';
+import { productionSummary } from '../production/production.service';
 const router = Router();
 
 router.use(authenticate);
@@ -85,7 +88,7 @@ router.get('/inventory-valuation', resolveLocation, async (req, res, next) => {
     const companyId = req.user!.companyId;
     const products = await prisma.product.findMany({
       where: { companyId },
-      select: { id: true, name: true, sku: true, cost: true, price: true },
+      select: { id: true, name: true, sku: true, cost: true, price: true, unit: true },
       orderBy: { name: 'asc' },
     });
     const stock = await stockByProduct(prisma, companyId, req.locationId ?? req.allowedLocationIds);
@@ -132,6 +135,150 @@ router.get('/sales-by-method', async (req, res, next) => {
         count: r._count,
       })),
     });
+  } catch (err) { next(err); }
+});
+
+function reportDate(value: unknown, endOfDay = false): Date | undefined {
+  if (typeof value !== 'string' || !value) return undefined;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) throw badRequest(`Invalid date: ${value}`);
+  if (endOfDay && /^\d{4}-\d{2}-\d{2}$/.test(value)) d.setHours(23, 59, 59, 999);
+  return d;
+}
+
+// PRODUCT MARGINS — what each product earned after its actual batch cost.
+// Revenue is net of invoice discounts (shared across lines by value) and
+// excludes VAT; cost is the FIFO cost of the batches each sale used.
+router.get('/product-margins', resolveLocation, async (req, res, next) => {
+  try {
+    const companyId = req.user!.companyId;
+    const from = reportDate(req.query.from);
+    const to = reportDate(req.query.to, true);
+    const locationIds = await reportLocationIds(req);
+    const invoices = await prisma.invoice.findMany({
+      where: {
+        companyId,
+        status: { notIn: ['draft', 'cancelled'] },
+        finalizedAt: { not: null, ...(from && { gte: from }), ...(to && { lte: to }) },
+        ...(locationIds && { locationId: { in: locationIds } }),
+      },
+      include: { items: { include: { product: { select: { name: true, unit: true, itemType: true } } } } },
+    });
+    const movements = invoices.length
+      ? await prisma.stockMovement.findMany({
+          where: { companyId, type: 'sale', reference: { in: invoices.map((i) => i.invoiceNumber) } },
+          select: { productId: true, reference: true, totalCost: true },
+        })
+      : [];
+    const costOf = new Map<string, number>();
+    for (const m of movements) {
+      const key = `${m.reference}|${m.productId}`;
+      costOf.set(key, (costOf.get(key) ?? 0) + m.totalCost);
+    }
+    type Row = { productId: string | null; name: string; unit: string | null; quantity: number; revenue: number; cost: number };
+    const rows = new Map<string, Row>();
+    for (const inv of invoices) {
+      const share = inv.subtotal > 0 ? 1 - inv.discountTotal / inv.subtotal : 1;
+      const counted = new Set<string>();
+      for (const it of inv.items) {
+        const key = it.productId ?? `custom:${it.description}`;
+        const row = rows.get(key) ?? { productId: it.productId, name: it.product?.name ?? it.description, unit: it.product?.unit ?? null, quantity: 0, revenue: 0, cost: 0 };
+        row.quantity += it.quantity;
+        row.revenue += it.total * share;
+        // A product on several lines of one invoice: its cost is counted once.
+        if (it.productId && !counted.has(it.productId)) {
+          row.cost += costOf.get(`${inv.invoiceNumber}|${it.productId}`) ?? 0;
+          counted.add(it.productId);
+        }
+        rows.set(key, row);
+      }
+    }
+    const data = Array.from(rows.values())
+      .map((r) => {
+        const revenue = round2(r.revenue), cost = round2(r.cost), profit = round2(revenue - cost);
+        return {
+          ...r, quantity: Math.round(r.quantity * 10000) / 10000, revenue, cost, profit,
+          marginPercent: revenue > 0 ? round2((profit / revenue) * 100) : null,
+          unitPrice: r.quantity > 0 ? round2(revenue / r.quantity) : 0,
+          unitCost: r.quantity > 0 ? round2(cost / r.quantity) : 0,
+        };
+      })
+      .sort((a, b) => b.profit - a.profit);
+    const revenue = round2(data.reduce((s, r) => s + r.revenue, 0));
+    const cost = round2(data.reduce((s, r) => s + r.cost, 0));
+    res.json({
+      success: true,
+      data: {
+        products: data,
+        totals: { revenue, cost, profit: round2(revenue - cost), marginPercent: revenue > 0 ? round2(((revenue - cost) / revenue) * 100) : null },
+      },
+    });
+  } catch (err) { next(err); }
+});
+
+// PRODUCTION — completed runs, yields and costs for a period.
+router.get('/production', resolveLocation, async (req, res, next) => {
+  try {
+    const data = await productionSummary(
+      req.user!.companyId, reportDate(req.query.from), reportDate(req.query.to, true), await reportLocationIds(req)
+    );
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+});
+
+// STOCK MOVEMENT — opening, in, out and closing quantity per product for a
+// period. Closing comes from the stock batches now, less anything after `to`,
+// so it always agrees with the inventory figures.
+const MOVEMENT_GROUPS: Record<string, string> = {
+  opening: 'received', receipt: 'received',
+  production_output: 'produced',
+  production_issue: 'usedInProduction', production_return: 'usedInProduction',
+  sale: 'sold', return: 'sold',
+  supplier_return: 'returnedToSupplier',
+  adjustment: 'adjusted', count: 'adjusted', damage: 'adjusted',
+};
+
+router.get('/stock-movement', resolveLocation, async (req, res, next) => {
+  try {
+    const companyId = req.user!.companyId;
+    const from = reportDate(req.query.from);
+    const to = reportDate(req.query.to, true);
+    const location = req.locationId ?? req.allowedLocationIds;
+    const locWhere = Array.isArray(location) ? { locationId: { in: location } } : { locationId: location };
+    const [products, stock, movements] = await Promise.all([
+      prisma.product.findMany({ where: { companyId }, select: { id: true, name: true, unit: true, itemType: true }, orderBy: { name: 'asc' } }),
+      stockByProduct(prisma, companyId, location),
+      prisma.stockMovement.findMany({
+        where: { companyId, ...locWhere, ...(from && { createdAt: { gte: from } }) },
+        select: { productId: true, type: true, quantity: true, totalCost: true, createdAt: true },
+      }),
+    ]);
+    type Groups = Record<'received' | 'produced' | 'usedInProduction' | 'sold' | 'returnedToSupplier' | 'adjusted', number>;
+    const blank = (): Groups => ({ received: 0, produced: 0, usedInProduction: 0, sold: 0, returnedToSupplier: 0, adjusted: 0 });
+    const per = new Map<string, { inPeriod: Groups; value: Groups; after: number }>();
+    for (const m of movements) {
+      const row = per.get(m.productId) ?? { inPeriod: blank(), value: blank(), after: 0 };
+      if (to && m.createdAt > to) {
+        row.after += m.quantity;
+      } else {
+        const g = (MOVEMENT_GROUPS[m.type] ?? 'adjusted') as keyof Groups;
+        row.inPeriod[g] += m.quantity;
+        row.value[g] += Math.sign(m.quantity) * m.totalCost;
+      }
+      per.set(m.productId, row);
+    }
+    const q = (n: number) => Math.round(n * 10000) / 10000;
+    const data = products
+      .map((p) => {
+        const row = per.get(p.id) ?? { inPeriod: blank(), value: blank(), after: 0 };
+        const closing = q((stock.get(p.id)?.quantity ?? 0) - row.after);
+        const net = Object.values(row.inPeriod).reduce((s, v) => s + v, 0);
+        const groups = Object.fromEntries(Object.entries(row.inPeriod).map(([k, v]) => [k, q(v)])) as Groups;
+        const values = Object.fromEntries(Object.entries(row.value).map(([k, v]) => [k, round2(v)])) as Groups;
+        return { productId: p.id, name: p.name, unit: p.unit, itemType: p.itemType, opening: q(closing - net), ...groups, values, closing };
+      })
+      .filter((r) => r.opening !== 0 || r.closing !== 0 || Object.values(r.values).some((v) => v !== 0) || r.received || r.sold || r.produced || r.usedInProduction || r.adjusted || r.returnedToSupplier);
+    res.json({ success: true, data });
   } catch (err) { next(err); }
 });
 

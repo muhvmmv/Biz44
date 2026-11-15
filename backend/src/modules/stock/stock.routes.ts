@@ -88,7 +88,7 @@ router.post('/receive', resolveLocation, async (req: Request, res: Response, nex
     const companyId = req.user!.companyId;
     const locationId = requireTargetLocation(req);
     const {
-      items: rawItems, supplierId, reference, notes,
+      items: rawItems, supplierId, reference, notes, dueDate: rawDueDate,
       paymentStatus: requestedStatus = 'paid', amountPaid, paymentAccount, paymentAccountId,
     } = req.body as {
       items: { productId: string; quantity: number; unitCost: number; sellingPrice?: number }[];
@@ -99,7 +99,13 @@ router.post('/receive', resolveLocation, async (req: Request, res: Response, nex
       paymentStatus?: string;
       amountPaid?: number;
       paymentAccount?: string;
+      dueDate?: string;
     };
+    let dueDate: Date | null = null;
+    if (rawDueDate) {
+      dueDate = new Date(rawDueDate);
+      if (isNaN(dueDate.getTime())) throw badRequest('Invalid due date');
+    }
 
     if (!Array.isArray(rawItems) || rawItems.length === 0) {
       return res.status(400).json({ success: false, message: 'At least one item required' });
@@ -166,6 +172,8 @@ router.post('/receive', resolveLocation, async (req: Request, res: Response, nex
           total: totalCost,
           amountPaid: paidAmount,
           status: paymentStatus,
+          // A due date only matters while something is owed.
+          dueDate: outstanding > 0.01 ? dueDate : null,
           notes,
           items: {
             create: items.map((it) => ({
