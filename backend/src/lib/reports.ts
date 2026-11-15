@@ -201,6 +201,8 @@ const CASH_FLOW_LABELS: Record<string, string> = {
   invoice_payment: 'Customer payments',
   invoice_cancel: 'Refunds to customers',
   credit_note: 'Refunds to customers',
+  deposit: 'Customer deposits',
+  deposit_refund: 'Deposit refunds',
   purchase: 'Paid to suppliers on delivery',
   purchase_payment: 'Supplier payments',
   supplier_return: 'Refunds from suppliers',

@@ -5,6 +5,12 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, Play, CheckCircle2, XCircle, PackagePlus, Undo2, Pencil, ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
+import { useAuth } from "@/hooks/useAuth";
+import { can } from "@/lib/permissions";
+import PaymentAccountSelect from "@/components/ui/PaymentAccountSelect";
+import { ButtonLink } from "@/components/ui/Button";
+import { StatusBadge as Status } from "@/components/ui/Badge";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import { StatusBadge } from "@/components/ui/Badge";
@@ -61,6 +67,16 @@ interface Order {
   product: { id: string; name: string; unit: string; price: number };
   location: { id: string; name: string } | null;
   materials: Material[];
+  customer: { id: string; firstName: string; lastName: string; phone: string | null } | null;
+  unitPrice: number | null;
+  orderValue: number | null;
+  depositsReceived: number;
+  depositsUnused: number;
+  deposits: {
+    id: string; number: string; amount: number; appliedAmount: number; refundedAmount: number; available: number;
+    method: string; accountName: string | null; reference: string | null; receivedAt: string;
+  }[];
+  invoices: { id: string; invoiceNumber: string; status: string; total: number; amountPaid: number; creditedAmount: number }[];
   outputBatches: { id: string; quantityReceived: number; quantityRemaining: number; unitCost: number; receivedAt: string }[];
 }
 interface Product { id: string; name: string; unit: string; itemType: string; quantity: number }
@@ -334,6 +350,10 @@ export default function ProductionOrderPage() {
         </Card>
       )}
 
+      {order.customer && (
+        <CustomerOrderCard order={order} onChanged={() => fetchOrder().then(setOrder).catch((e: unknown) => reportError(e))} />
+      )}
+
       {order.notes && (
         <Card><CardContent className="pt-5 text-sm"><span className="text-ink-soft">Notes: </span>{order.notes}</CardContent></Card>
       )}
@@ -439,5 +459,156 @@ export default function ProductionOrderPage() {
         {actionError ? <p className="text-sm text-danger" role="alert">{actionError}</p> : <p className="text-sm text-ink-soft">This can&apos;t be undone.</p>}
       </Dialog>
     </div>
+  );
+}
+
+
+/** Made-to-order details: agreed value, deposits taken, refunds and the invoice. */
+function CustomerOrderCard({ order, onChanged }: { order: Order; onChanged: () => void }) {
+  const { format } = useCurrency();
+  const { user } = useAuth();
+  const canMoney = can(user?.permissions, "sales", "write") || can(user?.permissions, "money", "write");
+  const [mode, setMode] = useState<null | "deposit" | { refund: Order["deposits"][number] }>(null);
+  const [amount, setAmount] = useState(0);
+  const [accountId, setAccountId] = useState("");
+  const [method, setMethod] = useState("bank_transfer");
+  const [reference, setReference] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const value = order.orderValue ?? 0;
+  const toCollect = Math.max(0, Math.round((value - order.depositsReceived) * 100) / 100);
+  const pct = value > 0 ? Math.min(100, (order.depositsReceived / value) * 100) : 0;
+  const openInvoice = order.invoices.find((i) => i.status !== "cancelled");
+
+  const openDeposit = () => { setAmount(toCollect); setReference(""); setError(""); setMode("deposit"); };
+  const openRefund = (d: Order["deposits"][number]) => { setAmount(d.available); setReference(""); setError(""); setMode({ refund: d }); };
+
+  const save = async () => {
+    setError("");
+    if (!(amount > 0)) return setError("Enter an amount");
+    if (!accountId) return setError("Choose the account");
+    setBusy(true);
+    try {
+      if (mode === "deposit") {
+        await apiFetch("/deposits", { method: "POST", body: JSON.stringify({ productionOrderId: order.id, amount, accountId, method, reference: reference || undefined }) });
+      } else if (mode && typeof mode === "object") {
+        await apiFetch(`/deposits/${mode.refund.id}/refund`, { method: "POST", body: JSON.stringify({ amount, accountId, reference: reference || undefined }) });
+      }
+      setMode(null);
+      onChanged();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Could not save");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Customer order</CardTitle>
+        <div className="flex flex-wrap gap-2">
+          {canMoney && order.status !== "cancelled" && !openInvoice && (
+            <Button variant="outline" size="sm" onClick={openDeposit}>Record deposit</Button>
+          )}
+          {order.status === "completed" && !openInvoice && can(user?.permissions, "sales", "write") && (
+            <ButtonLink href={`/dashboard/invoices/new?productionOrderId=${order.id}`} size="sm">Create invoice</ButtonLink>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 text-sm">
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div>
+            <p className="text-ink-soft">Customer</p>
+            <Link href={`/dashboard/customers/${order.customer!.id}`} className="font-semibold text-brand-dark hover:underline">{order.customer!.firstName} {order.customer!.lastName}</Link>
+            {order.customer!.phone && <p className="text-xs text-ink-soft">{order.customer!.phone}</p>}
+          </div>
+          <div>
+            <p className="text-ink-soft">Order value</p>
+            <p className="font-semibold tabular-nums">{order.orderValue !== null ? format(order.orderValue) : "No price agreed"}</p>
+            {order.unitPrice !== null && <p className="text-xs text-ink-soft">{format(order.unitPrice)} per {order.product.unit}</p>}
+          </div>
+          <div>
+            <p className="text-ink-soft">Paid up front</p>
+            <p className="font-semibold tabular-nums">{format(order.depositsReceived)}</p>
+            {value > 0 && <p className="text-xs text-ink-soft">{toCollect > 0 ? `${format(toCollect)} to collect` : "Paid in full"}</p>}
+          </div>
+        </div>
+        {value > 0 && (
+          <div className="h-2 overflow-hidden rounded-full bg-surface-muted" aria-hidden="true">
+            <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-green-600 transition-[width] duration-700" style={{ width: `${pct}%` }} />
+          </div>
+        )}
+        {order.deposits.length > 0 && (
+          <ul className="divide-y divide-border-soft rounded-xl border border-border-soft">
+            {order.deposits.map((d) => (
+              <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
+                <span>
+                  <span className="font-semibold">{d.number}</span>
+                  <span className="text-ink-soft"> · {new Date(d.receivedAt).toLocaleDateString()} · {d.accountName ?? d.method}{d.reference ? ` · ${d.reference}` : ""}</span>
+                  <span className="block text-xs text-ink-soft">
+                    {d.appliedAmount > 0 && `${format(d.appliedAmount)} used on the invoice. `}
+                    {d.refundedAmount > 0 && `${format(d.refundedAmount)} refunded. `}
+                    {d.available > 0 && `${format(d.available)} unused.`}
+                  </span>
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className="font-semibold tabular-nums">{format(d.amount)}</span>
+                  {canMoney && d.available > 0 && (order.status === "cancelled" || !openInvoice) && (
+                    <Button variant="ghost" size="sm" onClick={() => openRefund(d)}>Refund</Button>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {order.invoices.length > 0 && (
+          <div className="space-y-1">
+            {order.invoices.map((i) => (
+              <Link key={i.id} href={`/dashboard/invoices/${i.id}`} className="flex items-center justify-between rounded-xl bg-surface-muted px-3 py-2 hover:bg-border-soft/40">
+                <span className="font-semibold">{i.invoiceNumber}</span>
+                <span className="flex items-center gap-2"><Status status={i.status} /><span className="tabular-nums">{format(i.total)}</span></span>
+              </Link>
+            ))}
+          </div>
+        )}
+        {order.status === "cancelled" && order.depositsUnused > 0 && (
+          <p className="rounded-xl bg-warning-soft px-3 py-2 text-warning">This order was cancelled with {format(order.depositsUnused)} of deposits unused. Refund it, or keep it as the customer&apos;s credit.</p>
+        )}
+      </CardContent>
+
+      <Dialog
+        open={mode !== null}
+        onClose={() => setMode(null)}
+        title={mode === "deposit" ? "Record deposit" : `Refund ${mode && typeof mode === "object" ? mode.refund.number : ""}`}
+        description={mode === "deposit" ? "Money received from the customer before the goods are invoiced. It is applied to the invoice when you bill this order." : "Pay the unused deposit back to the customer."}
+        footer={<><Button variant="outline" onClick={() => setMode(null)}>Cancel</Button><Button onClick={save} isLoading={busy}>{mode === "deposit" ? "Record deposit" : "Refund"}</Button></>}
+      >
+        <Field label="Amount" hint={mode === "deposit" && value > 0 ? `${format(toCollect)} left to collect` : undefined}>
+          <NumericInput min={0} value={amount} onChange={setAmount} />
+        </Field>
+        {mode === "deposit" && value > 0 && toCollect > 0 && (
+          <div className="flex gap-2 text-xs">
+            <button type="button" className="font-semibold text-brand-dark hover:underline" onClick={() => setAmount(toCollect)}>Full balance</button>
+            <button type="button" className="font-semibold text-brand-dark hover:underline" onClick={() => setAmount(Math.round(toCollect * 50) / 100)}>Half</button>
+          </div>
+        )}
+        <Field label={mode === "deposit" ? "Received into" : "Paid from"}><PaymentAccountSelect value={accountId} onChange={setAccountId} /></Field>
+        {mode === "deposit" && (
+          <Field label="Method">
+            <Select value={method} onChange={(e) => setMethod(e.target.value)}>
+              <option value="bank_transfer">Bank transfer</option>
+              <option value="cash">Cash</option>
+              <option value="mobile">Mobile payment</option>
+              <option value="card">Card</option>
+              <option value="other">Other</option>
+            </Select>
+          </Field>
+        )}
+        <Field label="Reference"><Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Optional, e.g. transfer reference" /></Field>
+        {error && <p className="text-sm text-danger" role="alert">{error}</p>}
+      </Dialog>
+    </Card>
   );
 }

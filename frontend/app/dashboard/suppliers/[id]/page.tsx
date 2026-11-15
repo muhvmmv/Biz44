@@ -170,10 +170,10 @@ export default function SupplierDetailPage() {
                         <span
                           className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
                             p.status === "paid"
-                              ? "bg-[#E6F0EA] text-success"
+                              ? "bg-success-soft text-success"
                               : p.status === "partially_paid"
-                              ? "bg-[#E3EBF1] text-info"
-                              : "bg-[#F7EEDC] text-warning"
+                              ? "bg-info-soft text-info"
+                              : "bg-warning-soft text-warning"
                           }`}
                         >
                           {p.status.replace("_", " ")}

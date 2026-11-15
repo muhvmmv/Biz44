@@ -70,6 +70,7 @@ model Company {
   onboardingCompleted Boolean           @default(false)
   stockTransfers      StockTransfer[]
   creditNotes         CreditNote[]
+  customerDeposits    CustomerDeposit[]
 }
 
 model Customer {
@@ -84,6 +85,9 @@ model Customer {
   invoices  Invoice[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+
+  productionOrders ProductionOrder[]
+  deposits         CustomerDeposit[]
 
   @@map("customers")
 }
@@ -235,6 +239,10 @@ model Invoice {
   creditedAmount Float        @default(0)
   creditNotes    CreditNote[]
 
+  /// The production order this invoice bills, if any; its deposits are applied on finalizing.
+  productionOrderId String?
+  productionOrder   ProductionOrder? @relation(fields: [productionOrderId], references: [id])
+
   @@unique([companyId, invoiceNumber])
   @@index([companyId, locationId])
   @@map("invoices")
@@ -270,6 +278,10 @@ model Payment {
   notes      String?
   paidAt     DateTime  @default(now())
   createdAt  DateTime  @default(now())
+
+  /// Set when this payment is a customer deposit applied to the invoice.
+  depositId String?
+  deposit   CustomerDeposit? @relation(fields: [depositId], references: [id])
 
   @@index([companyId, locationId])
   @@map("payments")
@@ -523,6 +535,8 @@ model Location {
 
   creditNotes CreditNote[]
 
+  customerDeposits CustomerDeposit[]
+
   @@index([companyId, status])
   @@map("locations")
 }
@@ -624,6 +638,14 @@ model ProductionOrder {
   outputBatches    InventoryBatch[]
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
+
+  /// Made to order for this customer (optional).
+  customerId String?
+  customer   Customer?         @relation(fields: [customerId], references: [id])
+  /// Agreed selling price per unit for a customer order (optional).
+  unitPrice  Float?
+  deposits   CustomerDeposit[]
+  invoices   Invoice[]
 
   @@unique([companyId, number])
   @@index([companyId, status])
@@ -749,4 +771,39 @@ model CreditNoteLine {
   cost          Float       @default(0)
 
   @@map("credit_note_lines")
+}
+
+/// Money received from a customer before they are invoiced (e.g. a deposit
+/// on a production order). Held as a liability until applied to an invoice
+/// or refunded.
+model CustomerDeposit {
+  id                String           @id @default(uuid())
+  companyId         String
+  company           Company          @relation(fields: [companyId], references: [id])
+  locationId        String?
+  location          Location?        @relation(fields: [locationId], references: [id])
+  customerId        String
+  customer          Customer         @relation(fields: [customerId], references: [id])
+  productionOrderId String?
+  productionOrder   ProductionOrder? @relation(fields: [productionOrderId], references: [id])
+  /// DEP-0001, DEP-0002, … per company
+  number            String
+  amount            Float
+  /// Used to pay invoices.
+  appliedAmount     Float            @default(0)
+  /// Paid back to the customer.
+  refundedAmount    Float            @default(0)
+  method            String           @default("cash")
+  accountName       String?
+  reference         String?
+  notes             String?
+  receivedAt        DateTime         @default(now())
+  createdById       String?
+  createdAt         DateTime         @default(now())
+  applications      Payment[]
+
+  @@unique([companyId, number])
+  @@index([customerId])
+  @@index([productionOrderId])
+  @@map("customer_deposits")
 }

@@ -29,6 +29,8 @@ interface Order {
   createdAt: string;
   product: { id: string; name: string; unit: string };
   location: { name: string } | null;
+  customer: { id: string; firstName: string; lastName: string } | null;
+  depositsReceived: number;
 }
 
 interface Summary {
@@ -73,7 +75,17 @@ export default function ProductionOrdersPage() {
 
   const columns: Column<Order>[] = [
     { key: "number", header: "Order", sortValue: (o) => o.number, cell: (o) => <span className="font-medium">{o.number}</span> },
-    { key: "product", header: "Product", sortValue: (o) => o.product.name, cell: (o) => o.product.name },
+    {
+      key: "product", header: "Product", sortValue: (o) => o.product.name,
+      cell: (o) => (
+        <span>
+          {o.product.name}
+          {o.customer
+            ? <span className="block text-xs text-ink-soft">For {o.customer.firstName} {o.customer.lastName}{o.depositsReceived > 0 ? ` · ${format(o.depositsReceived)} paid` : ""}</span>
+            : <span className="block text-xs text-ink-faint">For stock</span>}
+        </span>
+      ),
+    },
     { key: "planned", header: "Planned", align: "right", sortValue: (o) => o.plannedQuantity, cell: (o) => formatQty(o.plannedQuantity, o.product.unit) },
     {
       key: "produced", header: "Produced", align: "right", sortValue: (o) => o.producedQuantity,
@@ -138,7 +150,7 @@ export default function ProductionOrdersPage() {
         rows={rows}
         columns={columns}
         rowKey={(o) => o.id}
-        searchText={(o) => `${o.number} ${o.product.name}`}
+        searchText={(o) => `${o.number} ${o.product.name} ${o.customer ? `${o.customer.firstName} ${o.customer.lastName}` : ""}`}
         searchPlaceholder="Search order or product"
         error={error}
         onRetry={() => setKey((k) => k + 1)}

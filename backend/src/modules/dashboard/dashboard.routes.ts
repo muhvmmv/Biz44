@@ -301,6 +301,37 @@ router.get('/alerts', resolveLocation, async (req: Request, res: Response, next:
 });
 
 // ---------- RECENT INVOICES ----------
+// ---------- TOP CUSTOMERS (by sales in the last N months) ----------
+router.get('/top-customers', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!can(req.user!.role, 'sales')) throw new AppError(403, 'Your role does not include sales');
+    const months = Math.min(Math.max(parseInt(String(req.query.months || '12')) || 12, 1), 24);
+    const since = new Date();
+    since.setMonth(since.getMonth() - months + 1, 1);
+    since.setHours(0, 0, 0, 0);
+    const invoices = await prisma.invoice.findMany({
+      where: {
+        companyId: req.user!.companyId, ...locationWhere(req), customerId: { not: null },
+        status: { notIn: ['draft', 'cancelled'] }, finalizedAt: { gte: since },
+      },
+      select: { customerId: true, total: true, taxTotal: true, amountPaid: true, creditedAmount: true, customer: { select: { firstName: true, lastName: true } } },
+    });
+    const map = new Map<string, { id: string; name: string; sales: number; outstanding: number; invoices: number }>();
+    for (const i of invoices) {
+      const row = map.get(i.customerId!) ?? { id: i.customerId!, name: `${i.customer!.firstName} ${i.customer!.lastName}`.trim(), sales: 0, outstanding: 0, invoices: 0 };
+      row.sales += i.total - i.taxTotal - (i.creditedAmount ?? 0);
+      row.outstanding += Math.max(0, invoiceBalance(i));
+      row.invoices += 1;
+      map.set(i.customerId!, row);
+    }
+    const data = Array.from(map.values())
+      .map((r) => ({ ...r, sales: Math.round(r.sales * 100) / 100, outstanding: Math.round(r.outstanding * 100) / 100 }))
+      .sort((a, b) => b.sales - a.sales)
+      .slice(0, 6);
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+});
+
 router.get('/recent-invoices', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!can(req.user!.role, 'sales')) throw new AppError(403, 'Your role does not include sales');

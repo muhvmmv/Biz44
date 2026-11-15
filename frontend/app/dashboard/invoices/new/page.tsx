@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -62,9 +63,32 @@ export default function NewInvoicePage() {
       apiFetch<{ success: boolean; data: Product[] }>("/products"),
     ]).then(([c, p]) => {
       setCustomers(c.data);
-      setProducts(p.data);
+      // Only finished goods are sold; raw materials and packaging go into production.
+      setProducts(p.data.filter((x) => x.itemType === "finished_good"));
     });
   }, [version]);
+
+  // Billing a production order: prefill its customer, product, quantity and agreed price.
+  const productionOrderId = searchParams.get("productionOrderId");
+  const [order, setOrder] = useState<{ id: string; number: string; depositsUnused: number } | null>(null);
+  useEffect(() => {
+    if (!productionOrderId) return;
+    apiFetch<{ success: boolean; data: {
+      id: string; number: string; depositsUnused: number; unitPrice: number | null; status: string;
+      plannedQuantity: number; producedQuantity: number; customer: { id: string } | null; product: { id: string; name: string; price: number };
+    } }>(`/production/orders/${productionOrderId}`)
+      .then(({ data: o }) => {
+        setOrder({ id: o.id, number: o.number, depositsUnused: o.depositsUnused });
+        if (o.customer) { setCustomerMode("existing"); setCustomerId(o.customer.id); }
+        setItems([{
+          productId: o.product.id,
+          description: o.product.name,
+          quantity: o.status === "completed" ? o.producedQuantity : o.plannedQuantity,
+          unitPrice: o.unitPrice ?? o.product.price,
+        }]);
+      })
+      .catch((e: unknown) => reportError(e, "Could not load the production order"));
+  }, [productionOrderId]);
 
   useEffect(() => {
     apiFetch<{ success: boolean; data: { vatRate: number } }>("/settings/company")
@@ -139,6 +163,7 @@ export default function NewInvoicePage() {
         method: "POST",
         body: JSON.stringify({
           customerId: customerMode === "existing" ? customerId : null,
+          productionOrderId: order?.id,
           customerName: customerMode === "new" ? adhoc.name : null,
           customerEmail: customerMode === "new" ? adhoc.email : null,
           customerPhone: customerMode === "new" ? adhoc.phone : null,
@@ -172,6 +197,17 @@ export default function NewInvoicePage() {
       />
 
       <form onSubmit={handleSubmit} className="space-y-6">
+        {order && (
+          <div className="flex items-start gap-3 rounded-2xl border border-brand/30 bg-brand-light px-4 py-3 text-sm">
+            <span className="font-semibold text-brand-dark">Billing production order {order.number}.</span>
+            <span className="text-ink">
+              {order.depositsUnused > 0
+                ? <>The customer&apos;s deposit of <span className="font-semibold">{format(order.depositsUnused)}</span> is applied automatically when you finalize.</>
+                : "No deposit was taken on this order."}
+            </span>
+          </div>
+        )}
+
         <Card>
           <CardHeader>
             <CardTitle>Customer &amp; Dates</CardTitle>
@@ -452,7 +488,7 @@ export default function NewInvoicePage() {
         </Card>
 
         {error && (
-          <div className="bg-[#F4E2E1] border border-danger text-danger px-4 py-3 rounded-lg text-sm">
+          <div className="bg-danger-soft border border-danger text-danger px-4 py-3 rounded-lg text-sm">
             {error}
           </div>
         )}

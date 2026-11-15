@@ -3,10 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  Menu, Search, Plus, Bell, ChevronRight, MapPin, Check, Settings, LogOut, UserRound, Users, Building2, AlertTriangle, AlertCircle, Info,
+  Menu, Search, Plus, Bell, ChevronDown, MapPin, Check, Settings, LogOut, UserRound, Users, Building2, AlertTriangle, AlertCircle, Info, Factory, ShoppingBag,
 } from "lucide-react";
-import { apiFetch } from "@/lib/api";
-import { breadcrumbs } from "@/lib/navigation";
+import { usePathname } from "next/navigation";
+import { useAlerts } from "@/hooks/useAlerts";
 import { useAuth } from "@/hooks/useAuth";
 import { can, ROLE_LABELS } from "@/lib/permissions";
 import { useLocation } from "@/hooks/useLocation";
@@ -16,76 +16,74 @@ import { buttonClasses } from "@/components/ui/Button";
 import { QUICK_ACTIONS } from "./quickActions";
 import { cn } from "@/lib/utils";
 
-export interface Alert {
-  id: string;
-  severity: "danger" | "warning" | "info";
-  title: string;
-  detail: string;
-  amount?: number;
-  href: string;
-  count: number;
-}
+export type { Alert } from "@/hooks/useAlerts";
 
 export default function Header({
-  pathname,
   onOpenMenu,
   onOpenSearch,
+  roomy = true,
 }: {
   pathname: string;
+  /** False while the full sidebar panel is open (less width for labels). */
+  roomy?: boolean;
   onOpenMenu: () => void;
   onOpenSearch: () => void;
 }) {
-  const crumbs = breadcrumbs(pathname);
+  const { user } = useAuth();
   const [isMac, setIsMac] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setIsMac(/Mac|iPhone|iPad/.test(navigator.platform)), 0);
     return () => clearTimeout(t);
   }, []);
+  const canProduce = can(user?.permissions, "inventory", "write");
+  const canSell = can(user?.permissions, "sales", "write");
 
   return (
-    <header className="flex h-header shrink-0 items-center gap-3 border-b border-border-soft bg-surface/90 px-4 backdrop-blur supports-[backdrop-filter]:bg-surface/75 lg:px-8">
-      <button onClick={onOpenMenu} className="-ml-1 rounded-lg p-2 text-ink-soft hover:bg-ivory hover:text-ink lg:hidden" aria-label="Open menu">
+    <header className="sticky top-0 z-30 flex h-[72px] items-center gap-2 bg-ivory/70 px-4 backdrop-blur-xl supports-[backdrop-filter]:bg-ivory/55 sm:gap-3 sm:px-6 lg:px-8">
+      <button onClick={onOpenMenu} className="-ml-1 rounded-xl p-2 text-ink-soft hover:bg-surface hover:text-ink lg:hidden" aria-label="Open menu">
         <Menu size={20} />
       </button>
-
-      {/* Breadcrumbs */}
-      <nav aria-label="Breadcrumb" className="min-w-0 flex-1">
-        <ol className="flex items-center gap-1.5 text-sm">
-          {crumbs.map((c, i) => {
-            const last = i === crumbs.length - 1;
-            return (
-              <li key={`${c.label}-${i}`} className={cn("flex min-w-0 items-center gap-1.5", !last && "hidden sm:flex")}>
-                {i > 0 && <ChevronRight size={14} className="shrink-0 text-ink-faint" aria-hidden="true" />}
-                {last || !c.href ? (
-                  <span className={cn("truncate", last ? "font-semibold text-ink" : "text-ink-soft")} aria-current={last ? "page" : undefined}>
-                    {c.label}
-                  </span>
-                ) : (
-                  <Link href={c.href} className="truncate text-ink-soft hover:text-ink">{c.label}</Link>
-                )}
-              </li>
-            );
-          })}
-        </ol>
-      </nav>
 
       {/* Search */}
       <button
         onClick={onOpenSearch}
-        className="hidden h-10 w-64 items-center gap-2 rounded-xl border border-border-soft bg-surface-muted px-3 text-sm text-ink-faint transition-colors hover:border-border-strong md:flex"
+        className="hidden h-11 w-full max-w-xs items-center gap-2 rounded-full border border-border-soft bg-surface/80 px-4 text-sm text-ink-faint shadow-card transition-all hover:border-brand/40 hover:shadow-raised md:flex xl:max-w-sm"
         aria-label="Search"
       >
         <Search size={16} />
-        <span className="flex-1 text-left">Search…</span>
-        <kbd className="rounded-md border border-border-soft bg-surface px-1.5 text-[11px] text-ink-soft">{isMac ? "⌘K" : "Ctrl K"}</kbd>
+        <span className="flex-1 text-left">Search invoices, customers, products…</span>
+        <kbd className="rounded-md border border-border-soft bg-surface-muted px-1.5 text-[11px] text-ink-soft">{isMac ? "⌘K" : "Ctrl K"}</kbd>
       </button>
-      <button onClick={onOpenSearch} className="rounded-lg p-2 text-ink-soft hover:bg-ivory hover:text-ink md:hidden" aria-label="Search">
+      <button onClick={onOpenSearch} className="rounded-xl p-2 text-ink-soft hover:bg-surface hover:text-ink md:hidden" aria-label="Search">
         <Search size={20} />
       </button>
 
+      <div className="flex-1" />
+
+      {canProduce && (
+        <Link
+          href="/dashboard/production/new"
+          aria-label="New production order"
+          title="New production order"
+          className={cn("hidden h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-border-soft bg-surface/80 px-2.5 text-sm font-semibold text-ink shadow-card transition-all hover:-translate-y-0.5 hover:shadow-raised lg:flex", roomy ? "xl:px-4" : "2xl:px-4")}
+        >
+          <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-violet-400 to-purple-600 text-white"><Factory size={13} /></span>
+          <span className={cn("hidden", roomy ? "xl:inline" : "2xl:inline")}>Production order</span>
+        </Link>
+      )}
+      <CompanySwitcher />
+      {canSell && (
+        <Link
+          href="/dashboard/invoices/new"
+          className="group relative flex h-11 shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-full bg-gradient-to-br from-orange-400 via-orange-500 to-orange-600 px-5 text-sm font-extrabold tracking-wide text-white shadow-[0_8px_20px_-6px_rgb(240_90_40/0.6)] transition-all hover:-translate-y-0.5 hover:shadow-[0_12px_28px_-6px_rgb(240_90_40/0.7)]"
+        >
+          <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/35 to-transparent transition-transform duration-700 group-hover:translate-x-full" aria-hidden="true" />
+          <ShoppingBag size={16} />
+          SELL
+        </Link>
+      )}
       <QuickCreate />
-      <Notifications pathname={pathname} />
-      <LocationSwitcher />
+      <Notifications />
       <UserMenu />
     </header>
   );
@@ -98,7 +96,7 @@ function QuickCreate() {
   return (
     <DropdownMenu
       triggerLabel="Create new"
-      triggerClassName={buttonClasses("primary", "md", "px-3 sm:px-4")}
+      triggerClassName={cn(buttonClasses("primary", "md", "h-11 rounded-full px-3 sm:px-4"), "shadow-card")}
       trigger={<><Plus size={16} /><span className="hidden sm:inline">New</span></>}
       width="w-52"
     >
@@ -123,32 +121,22 @@ const SEVERITY = {
 };
 
 /** Live alerts from the database; refreshed on navigation and every 2 minutes. */
-function Notifications({ pathname }: { pathname: string }) {
+function Notifications() {
   const { format } = useCurrency();
-  const [alerts, setAlerts] = useState<Alert[] | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    const load = () =>
-      apiFetch<{ success: boolean; data: Alert[] }>("/dashboard/alerts")
-        .then((r) => { if (active) setAlerts(r.data); })
-        .catch(() => { if (active) setAlerts([]); });
-    load();
-    const t = setInterval(load, 120_000);
-    return () => { active = false; clearInterval(t); };
-  }, [pathname]);
+  const pathname = usePathname();
+  const alerts = useAlerts(pathname);
 
   const urgent = alerts?.filter((a) => a.severity !== "info").length ?? 0;
 
   return (
     <DropdownMenu
       triggerLabel={urgent ? `${urgent} alerts need attention` : "Alerts"}
-      triggerClassName="relative rounded-xl p-2.5 text-ink-soft transition-colors hover:bg-ivory hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+      triggerClassName="relative flex h-11 w-11 items-center justify-center rounded-full border border-border-soft bg-surface/80 text-ink-soft shadow-card transition-all hover:-translate-y-0.5 hover:text-ink hover:shadow-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
       trigger={
         <>
           <Bell size={19} />
           {urgent > 0 && (
-            <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-bold text-white ring-2 ring-surface">
+            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-bold text-white ring-2 ring-surface">
               {urgent}
             </span>
           )}
@@ -190,23 +178,39 @@ function Notifications({ pathname }: { pathname: string }) {
   );
 }
 
-/** Location switcher; hidden for a company with a single location. */
-function LocationSwitcher() {
+/** The company (bold) and the branch whose data is shown, switchable when there are several. */
+function CompanySwitcher() {
+  const { user } = useAuth();
   const { locations, activeLocationId, activeLocation, setActiveLocation } = useLocation();
-  if (locations.length <= 1) return null;
-  const label = activeLocationId === "all" ? "All locations" : activeLocation?.name ?? "Select location";
+  const branch = activeLocationId === "all" ? (locations.length > 1 ? "All branches" : locations[0]?.name ?? "Main branch") : activeLocation?.name ?? "Select branch";
+  const company = user?.companyName || "Your company";
+  const content = (
+    <>
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-zinc-700 to-zinc-900 text-[11px] font-bold text-white">
+        {company.split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase()}
+      </span>
+      <span className="hidden min-w-0 text-left leading-tight sm:block">
+        <span className="block max-w-[11rem] truncate text-sm font-bold text-ink">{company}</span>
+        <span className="flex items-center gap-1 text-xs text-ink-soft"><MapPin size={11} className="text-brand" /><span className="max-w-[9rem] truncate">{branch}</span></span>
+      </span>
+      {locations.length > 1 && <ChevronDown size={15} className="hidden text-ink-faint sm:block" />}
+    </>
+  );
+  const cls = "flex h-11 items-center gap-2.5 rounded-full border border-border-soft bg-surface/80 py-1 pl-1.5 pr-1.5 shadow-card transition-all sm:pr-4";
+  if (locations.length <= 1) return <div className={cls}>{content}</div>;
 
   return (
     <DropdownMenu
-      triggerLabel={`Location: ${label}`}
-      triggerClassName="hidden h-10 items-center gap-2 rounded-xl border border-border-soft bg-surface px-3 text-sm font-medium text-ink transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand sm:flex"
-      trigger={<><MapPin size={15} className="text-brand" /><span className="max-w-[9rem] truncate">{label}</span></>}
+      triggerLabel={`${company}, ${branch}`}
+      triggerClassName={cn(cls, "hover:-translate-y-0.5 hover:shadow-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand")}
+      trigger={content}
+      width="w-64"
     >
       {(close) => (
         <>
           <MenuLabel>Show data for</MenuLabel>
           <MenuButton onClick={() => { setActiveLocation("all"); close(); window.location.reload(); }}>
-            <Building2 size={15} /> <span className="flex-1">All locations</span>
+            <Building2 size={15} /> <span className="flex-1">All branches</span>
             {activeLocationId === "all" && <Check size={15} className="!text-brand" />}
           </MenuButton>
           {locations.map((l) => (
@@ -219,8 +223,12 @@ function LocationSwitcher() {
               {activeLocationId === l.id && <Check size={15} className="!text-brand" />}
             </MenuButton>
           ))}
-          <MenuDivider />
-          <MenuLink href="/dashboard/settings/locations" onSelect={close}><Settings size={15} /> Manage locations</MenuLink>
+          {user?.role === "admin" && (
+            <>
+              <MenuDivider />
+              <MenuLink href="/dashboard/settings/locations" onSelect={close}><Settings size={15} /> Manage branches</MenuLink>
+            </>
+          )}
         </>
       )}
     </DropdownMenu>
@@ -233,7 +241,7 @@ function UserMenu() {
   return (
     <DropdownMenu
       triggerLabel="Account menu"
-      triggerClassName="flex h-10 w-10 items-center justify-center rounded-full bg-charcoal text-xs font-bold text-white transition-colors hover:bg-charcoal-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+      triggerClassName="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-zinc-700 to-zinc-900 text-xs font-bold text-white shadow-card transition-colors hover:bg-charcoal-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
       trigger={initials || "?"}
       width="w-60"
     >

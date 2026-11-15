@@ -13,7 +13,7 @@ import { invoiceBalance } from './invoiceBalance';
  */
 export interface StatementLine {
   date: Date;
-  type: 'invoice' | 'payment' | 'refund' | 'cancellation' | 'credit' | 'purchase' | 'return';
+  type: 'invoice' | 'payment' | 'refund' | 'cancellation' | 'credit' | 'deposit' | 'deposit_refund' | 'purchase' | 'return';
   reference: string | null;
   description: string;
   documentId: string | null;
@@ -99,6 +99,8 @@ export async function customerStatement(companyId: string, customerId: string, f
       description: `Invoice ${inv.invoiceNumber}`, documentId: inv.id, amount: inv.total,
     });
     for (const p of inv.payments) {
+      // A deposit applied to the invoice was already counted when it was received.
+      if (p.depositId) continue;
       const refund = p.amount < 0;
       events.push({
         date: p.paidAt, type: refund ? 'refund' : 'payment', reference: p.reference || inv.invoiceNumber,
@@ -118,6 +120,17 @@ export async function customerStatement(companyId: string, customerId: string, f
         date: cancelDates.get(inv.id) ?? inv.updatedAt, type: 'cancellation', reference: inv.invoiceNumber,
         description: `Invoice ${inv.invoiceNumber} cancelled`, documentId: inv.id, amount: -inv.total,
       });
+    }
+  }
+
+  // Deposits received (e.g. on production orders) reduce what the customer
+  // owes as soon as they are paid; refunds of them add it back.
+  const deposits = await prisma.customerDeposit.findMany({ where: { companyId, customerId } });
+  const refundDates = await cancellationDates(companyId, 'deposit_refund', deposits.filter((d) => d.refundedAmount > 0).map((d) => d.id));
+  for (const d of deposits) {
+    events.push({ date: d.receivedAt, type: 'deposit', reference: d.number, description: `Deposit ${d.number}${d.reference ? ` (${d.reference})` : ''}`, documentId: null, amount: -d.amount });
+    if (d.refundedAmount > 0) {
+      events.push({ date: refundDates.get(d.id) ?? d.createdAt, type: 'deposit_refund', reference: d.number, description: `Refund of deposit ${d.number}`, documentId: null, amount: d.refundedAmount });
     }
   }
 

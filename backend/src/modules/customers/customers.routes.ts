@@ -73,7 +73,10 @@ router.get('/:id/summary', async (req: Request, res: Response, next: NextFunctio
       success: true,
       data: {
         customer,
-        summary: { totalSales: totalSales - totalCredited, totalPaid, outstanding, invoiceCount: invoices.length },
+        summary: {
+          totalSales: totalSales - totalCredited, totalPaid, outstanding, invoiceCount: invoices.length,
+          depositsHeld: Math.round((await prisma.customerDeposit.findMany({ where: { companyId, customerId: customer.id } })).reduce((s, d) => s + d.amount - d.appliedAmount - d.refundedAmount, 0) * 100) / 100,
+        },
         invoices,
         payments,
       },

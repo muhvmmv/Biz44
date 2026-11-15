@@ -113,7 +113,7 @@ export default function InventoryPage() {
       label: "Total Units",
       value: totalUnits.toLocaleString(),
       icon: Package,
-      color: "text-info bg-[#E3EBF1]",
+      color: "text-info bg-info-soft",
     },
     {
       label: "Inventory Value",
@@ -125,13 +125,13 @@ export default function InventoryPage() {
       label: "Low Stock",
       value: lowStock.toString(),
       icon: AlertTriangle,
-      color: "text-warning bg-[#F7EEDC]",
+      color: "text-warning bg-warning-soft",
     },
     {
       label: "Out of Stock",
       value: outOfStock.toString(),
       icon: XCircle,
-      color: "text-danger bg-[#F4E2E1]",
+      color: "text-danger bg-danger-soft",
     },
   ];
 

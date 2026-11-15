@@ -38,6 +38,7 @@ export const SYSTEM_ACCOUNTS = {
   ap: { name: 'Accounts Payable', type: 'liability', code: '2000' },
   payroll_liabilities: { name: 'Payroll Deductions Payable', type: 'liability', code: '2100' },
   vat_payable: { name: 'VAT Payable', type: 'liability', code: '2200' },
+  customer_deposits: { name: 'Customer Deposits', type: 'liability', code: '2300' },
   opening_equity: { name: 'Opening Balance Equity', type: 'equity', code: '3000' },
   owner_capital: { name: "Owner's Capital", type: 'equity', code: '3100' },
   owner_drawings: { name: "Owner's Drawings", type: 'equity', code: '3200' },

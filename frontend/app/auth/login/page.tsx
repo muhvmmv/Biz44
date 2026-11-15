@@ -45,7 +45,7 @@ export default function LoginPage() {
     >
       <form onSubmit={handleSubmit} className="space-y-5">
         {error && (
-          <div className="bg-[#F4E2E1] border border-danger text-danger px-4 py-3 rounded-lg text-sm">{error}</div>
+          <div className="bg-danger-soft border border-danger text-danger px-4 py-3 rounded-lg text-sm">{error}</div>
         )}
         <div>
           <label htmlFor="email" className="block text-sm font-medium text-charcoal mb-1">Email address</label>

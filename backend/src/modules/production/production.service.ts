@@ -17,6 +17,7 @@
  * as quantities: output shortfall against plan and material used above the
  * BOM standard for what was actually produced.
  */
+import { depositAvailable, withAvailable } from '../../lib/deposits';
 import { prisma } from '../../lib/prisma';
 import { AppError, badRequest, notFound } from '../../lib/errors';
 import { parsePositiveQuantity, parseQuantity, roundQty } from '../../lib/accounts';
@@ -194,11 +195,12 @@ export async function createOrder(
   companyId: string,
   userId: string,
   locationId: string,
-  body: { productId?: unknown; plannedQuantity?: unknown; plannedDate?: unknown; notes?: unknown }
+  body: { productId?: unknown; plannedQuantity?: unknown; plannedDate?: unknown; notes?: unknown; customerId?: unknown; unitPrice?: unknown }
 ) {
   const productId = typeof body.productId === 'string' ? body.productId : '';
   const product = await prisma.product.findFirst({ where: { id: productId, companyId } });
   if (!product) throw notFound('Product not found');
+  const { customerId, unitPrice } = await orderCustomer(companyId, body);
   const quantity = parsePositiveQuantity(body.plannedQuantity, 'Planned quantity');
   const plan = await planRequirements(companyId, product.id, quantity, locationId);
 
@@ -212,6 +214,8 @@ export async function createOrder(
           number,
           productId: product.id,
           plannedQuantity: quantity,
+          customerId,
+          unitPrice,
           plannedDate: typeof body.plannedDate === 'string' && body.plannedDate ? new Date(body.plannedDate) : null,
           notes: typeof body.notes === 'string' && body.notes.trim() ? body.notes.trim() : null,
           createdById: userId,
@@ -226,8 +230,25 @@ export async function createOrder(
   }
 }
 
+/** Customer and agreed price per unit for a made-to-order run (both optional). */
+async function orderCustomer(companyId: string, body: { customerId?: unknown; unitPrice?: unknown }) {
+  let customerId: string | null = null;
+  if (body.customerId) {
+    const c = await prisma.customer.findFirst({ where: { id: String(body.customerId), companyId }, select: { id: true } });
+    if (!c) throw notFound('Customer not found');
+    customerId = c.id;
+  }
+  let unitPrice: number | null = null;
+  if (body.unitPrice !== undefined && body.unitPrice !== null && body.unitPrice !== '') {
+    unitPrice = Number(body.unitPrice);
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) throw badRequest('Price per unit must be 0 or more');
+    unitPrice = round2(unitPrice);
+  }
+  return { customerId, unitPrice };
+}
+
 /** Change a draft's quantity (requirements are recalculated from the BOM), date or notes. */
-export async function updateDraft(companyId: string, id: string, body: { plannedQuantity?: unknown; plannedDate?: unknown; notes?: unknown }) {
+export async function updateDraft(companyId: string, id: string, body: { plannedQuantity?: unknown; plannedDate?: unknown; notes?: unknown; customerId?: unknown; unitPrice?: unknown }) {
   const order = await prisma.productionOrder.findFirst({ where: { id, companyId } });
   if (!order) throw notFound('Production order not found');
   if (order.status !== 'draft') throw badRequest('Only draft orders can be edited');
@@ -241,6 +262,8 @@ export async function updateDraft(companyId: string, id: string, body: { planned
         plannedQuantity: quantity,
         ...(body.plannedDate !== undefined && { plannedDate: body.plannedDate ? new Date(String(body.plannedDate)) : null }),
         ...(body.notes !== undefined && { notes: body.notes ? String(body.notes) : null }),
+        ...(body.customerId !== undefined && { customerId: (await orderCustomer(companyId, { customerId: body.customerId })).customerId }),
+        ...(body.unitPrice !== undefined && { unitPrice: (await orderCustomer(companyId, { unitPrice: body.unitPrice })).unitPrice }),
         materials: { create: plan.materials.map((m) => ({ productId: m.productId, plannedQuantity: m.required })) },
       },
     });
@@ -509,12 +532,15 @@ export async function listOrders(companyId: string, where: Record<string, unknow
     include: {
       product: { select: { id: true, name: true, unit: true } },
       location: { select: { name: true } },
+      customer: { select: { id: true, firstName: true, lastName: true } },
+      deposits: { select: { amount: true, appliedAmount: true, refundedAmount: true } },
     },
   });
   return orders.map((o) => ({
     ...o,
     yieldPercent: o.status === 'completed' && o.plannedQuantity > 0 ? round2((o.producedQuantity / o.plannedQuantity) * 100) : null,
     totalCost: o.status === 'completed' ? round2(o.producedQuantity * o.unitCost) : round2(o.materialCost),
+    depositsReceived: round2(o.deposits.reduce((s, d) => s + d.amount - d.refundedAmount, 0)),
   }));
 }
 
@@ -524,6 +550,9 @@ export async function getOrder(companyId: string, id: string) {
     include: {
       product: { select: { id: true, name: true, sku: true, unit: true, price: true, itemType: true } },
       location: { select: { id: true, name: true } },
+      customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
+      deposits: { orderBy: { receivedAt: 'asc' } },
+      invoices: { select: { id: true, invoiceNumber: true, status: true, total: true, amountPaid: true, creditedAmount: true, finalizedAt: true }, orderBy: { createdAt: 'asc' } },
       materials: {
         include: {
           product: { select: { id: true, name: true, sku: true, unit: true, itemType: true } },
@@ -587,6 +616,11 @@ export async function getOrder(companyId: string, id: string) {
     outputShortfall: order.status === 'completed' ? roundQty(Math.max(0, order.plannedQuantity - order.producedQuantity)) : null,
     yieldPercent: order.status === 'completed' && order.plannedQuantity > 0 ? round2(ratio * 100) : null,
     canStart: order.status === 'draft' && materials.every((m) => m.shortage === 0),
+    // Customer order: agreed value, deposits taken, and what is left to collect.
+    deposits: order.deposits.map(withAvailable),
+    orderValue: order.unitPrice === null ? null : round2(order.unitPrice * (order.status === 'completed' ? order.producedQuantity : order.plannedQuantity)),
+    depositsReceived: round2(order.deposits.reduce((s, d) => s + d.amount - d.refundedAmount, 0)),
+    depositsUnused: round2(order.deposits.reduce((s, d) => s + depositAvailable(d), 0)),
   };
 }
 

@@ -101,10 +101,11 @@ check('Receivables 170,000', await acct('ar') === 170000, String(await acct('ar'
 check('Finished goods left = 163,100 - 65,898.99 = 97,201.01', near(await acct('inventory'), 97201.01), String(await acct('inventory')));
 await ledgerOk('the sale');
 
-// ---------- decimal quantities: sell 2.5 kg maize directly ----------
-const inv2 = (await C('POST', '/invoices', { customerId: cust.id, items: [{ productId: maize.id, description: 'Maize', quantity: 2.5, unitPrice: 500 }] })).data;
-await C('POST', `/invoices/${inv2.id}/finalize`);
-check('Selling 2.5 kg maize takes cost 750 from raw materials', await acct('inventory_raw') === 316150, String(await acct('inventory_raw')));
+// ---------- raw materials are not sold; decimal quantities via a write-off ----------
+const rawSale = await C('POST', '/invoices', { customerId: cust.id, items: [{ productId: maize.id, description: 'Maize', quantity: 2.5, unitPrice: 500 }] });
+check('Invoicing a raw material is refused', rawSale.status === 400 && /finished goods/i.test(rawSale.json.message), JSON.stringify(rawSale.json));
+await C('POST', '/stock/damage', { productId: maize.id, quantity: 2.5, reason: 'Spilled' });
+check('Writing off 2.5 kg maize takes cost 750 from raw materials', await acct('inventory_raw') === 316150, String(await acct('inventory_raw')));
 
 // ---------- order 2: cancel a running order ----------
 const o2 = (await C('POST', '/production/orders', { productId: flour.id, plannedQuantity: 100 })).data;
