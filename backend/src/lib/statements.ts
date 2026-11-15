@@ -2,6 +2,7 @@ import { prisma } from './prisma';
 import { notFound } from './errors';
 import { round2 } from './ledger';
 import { purchaseBalance } from '../modules/purchases/purchase.service';
+import { invoiceBalance } from './invoiceBalance';
 
 /**
  * Customer and supplier statements, built from the documents themselves so
@@ -12,7 +13,7 @@ import { purchaseBalance } from '../modules/purchases/purchase.service';
  */
 export interface StatementLine {
   date: Date;
-  type: 'invoice' | 'payment' | 'refund' | 'cancellation' | 'purchase' | 'return';
+  type: 'invoice' | 'payment' | 'refund' | 'cancellation' | 'credit' | 'purchase' | 'return';
   reference: string | null;
   description: string;
   documentId: string | null;
@@ -86,7 +87,7 @@ export async function customerStatement(companyId: string, customerId: string, f
 
   const invoices = await prisma.invoice.findMany({
     where: { companyId, customerId, finalizedAt: { not: null } },
-    include: { payments: true },
+    include: { payments: true, creditNotes: true },
   });
   const cancelled = invoices.filter((i) => i.status === 'cancelled');
   const cancelDates = await cancellationDates(companyId, 'invoice_cancel', cancelled.map((i) => i.id));
@@ -105,6 +106,13 @@ export async function customerStatement(companyId: string, customerId: string, f
         documentId: inv.id, amount: -p.amount,
       });
     }
+    for (const cn of inv.creditNotes) {
+      events.push({
+        date: cn.createdAt, type: 'credit', reference: cn.number,
+        description: `Credit note ${cn.number} on ${inv.invoiceNumber}${cn.reason ? ` (${cn.reason})` : ''}`,
+        documentId: inv.id, amount: -cn.total,
+      });
+    }
     if (inv.status === 'cancelled') {
       events.push({
         date: cancelDates.get(inv.id) ?? inv.updatedAt, type: 'cancellation', reference: inv.invoiceNumber,
@@ -116,10 +124,10 @@ export async function customerStatement(companyId: string, customerId: string, f
   const now = new Date();
   const aging = emptyAging();
   const open = invoices
-    .filter((i) => i.status !== 'cancelled' && round2(i.total - i.amountPaid) > 0)
+    .filter((i) => i.status !== 'cancelled' && invoiceBalance(i) > 0)
     .map((i) => {
       const due = i.dueDate ?? (i.finalizedAt as Date);
-      const balance = round2(i.total - i.amountPaid);
+      const balance = invoiceBalance(i);
       addToAging(aging, balance, due, now);
       return {
         id: i.id, reference: i.invoiceNumber, date: i.finalizedAt, dueDate: i.dueDate,

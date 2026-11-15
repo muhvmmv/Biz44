@@ -69,6 +69,7 @@ model Company {
   teamSize            String?
   onboardingCompleted Boolean           @default(false)
   stockTransfers      StockTransfer[]
+  creditNotes         CreditNote[]
 }
 
 model Customer {
@@ -228,6 +229,10 @@ model Invoice {
   items           InvoiceItem[]
   payments        Payment[]
 
+  /// Total of credit notes against this invoice.
+  creditedAmount Float        @default(0)
+  creditNotes    CreditNote[]
+
   @@unique([companyId, invoiceNumber])
   @@index([companyId, locationId])
   @@map("invoices")
@@ -243,6 +248,8 @@ model InvoiceItem {
   quantity    Float    @default(1)
   unitPrice   Float    @default(0)
   total       Float    @default(0)
+
+  creditLines CreditNoteLine[]
 
   @@map("invoice_items")
 }
@@ -512,6 +519,8 @@ model Location {
   transfersOut StockTransfer[] @relation("TransferFrom")
   transfersIn  StockTransfer[] @relation("TransferTo")
 
+  creditNotes CreditNote[]
+
   @@index([companyId, status])
   @@map("locations")
 }
@@ -685,4 +694,57 @@ model StockTransferLine {
   totalCost  Float         @default(0)
 
   @@map("stock_transfer_lines")
+}
+
+/// Goods returned by a customer, or a credit for part of an invoice. The
+/// invoice itself is never changed: its balance is total - amountPaid -
+/// creditedAmount.
+model CreditNote {
+  id                String           @id @default(uuid())
+  companyId         String
+  company           Company          @relation(fields: [companyId], references: [id])
+  locationId        String?
+  location          Location?        @relation(fields: [locationId], references: [id])
+  invoiceId         String
+  invoice           Invoice          @relation(fields: [invoiceId], references: [id])
+  /// CN-0001, CN-0002, … per company
+  number            String
+  reason            String?
+  /// Value of the lines after the invoice's discount, before VAT.
+  subtotal          Float
+  taxTotal          Float            @default(0)
+  total             Float
+  /// Part of the total that reduced what the customer owed.
+  appliedAmount     Float            @default(0)
+  /// Part of the total paid back to the customer.
+  refundAmount      Float            @default(0)
+  refundAccountName String?
+  /// Cost of the goods put back into stock.
+  costReturned      Float            @default(0)
+  createdById       String?
+  createdAt         DateTime         @default(now())
+  lines             CreditNoteLine[]
+
+  @@unique([companyId, number])
+  @@index([invoiceId])
+  @@map("credit_notes")
+}
+
+model CreditNoteLine {
+  id            String      @id @default(uuid())
+  creditNoteId  String
+  creditNote    CreditNote  @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+  invoiceItemId String
+  invoiceItem   InvoiceItem @relation(fields: [invoiceItemId], references: [id])
+  productId     String?
+  description   String
+  quantity      Float
+  /// Price per unit after the invoice's discount, before VAT.
+  unitPrice     Float
+  total         Float
+  /// Put back into stock (false for damaged goods that are only credited).
+  restocked     Boolean     @default(true)
+  cost          Float       @default(0)
+
+  @@map("credit_note_lines")
 }

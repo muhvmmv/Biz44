@@ -17,9 +17,13 @@ import {
   DollarSign,
   Printer,
   ArrowLeft,
+  Undo2,
 } from "lucide-react";
 import { useCurrency } from "@/hooks/useCurrency";
 import { formatQty } from "@/lib/units";
+import { can } from "@/lib/permissions";
+import { useAuth } from "@/hooks/useAuth";
+import CreditNoteDialog from "@/components/invoices/CreditNoteDialog";
 
 interface Business {
   id: string;
@@ -41,6 +45,18 @@ interface Invoice {
   taxRate?: number;
   total: number;
   amountPaid: number;
+  creditedAmount?: number;
+  creditNotes?: {
+    id: string;
+    number: string;
+    reason: string | null;
+    total: number;
+    taxTotal: number;
+    refundAmount: number;
+    refundAccountName: string | null;
+    createdAt: string;
+    lines: { id: string; description: string; quantity: number; total: number; restocked: boolean }[];
+  }[];
   notes: string | null;
   dueDate: string | null;
   createdAt: string;
@@ -76,6 +92,7 @@ interface Invoice {
 export default function InvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { format } = useCurrency();
+  const { user } = useAuth();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [business, setBusiness] = useState<Business | null>(null);
   const [loading, setLoading] = useState(true);
@@ -122,6 +139,7 @@ export default function InvoiceDetailPage() {
   }, [id]);
 
   const [showFinalize, setShowFinalize] = useState(false);
+  const [showCredit, setShowCredit] = useState(false);
   const [initialAmount, setInitialAmount] = useState(0);
   const [initialMethod, setInitialMethod] = useState("cash");
   const [initialAccountId, setInitialAccountId] = useState("");
@@ -230,7 +248,9 @@ export default function InvoiceDetailPage() {
     );
   }
 
-  const balance = invoice.total - invoice.amountPaid;
+  const credited = invoice.creditedAmount ?? 0;
+  const balance = Math.round((invoice.total - invoice.amountPaid - credited) * 100) / 100;
+  const canCredit = !!invoice.finalizedAt && invoice.status !== "cancelled" && invoice.status !== "draft" && can(user?.permissions, "sales", "write");
   const statusVariant =
     invoice.status === "paid"
       ? "success"
@@ -283,16 +303,23 @@ export default function InvoiceDetailPage() {
                   </Button>
                 </>
               )}
-              {invoice.status === "paid" && (
+              {canCredit && (
+                <Button variant="outline" onClick={() => setShowCredit(true)}>
+                  <Undo2 className="w-4 h-4 mr-1" /> Return / credit
+                </Button>
+              )}
+              {invoice.status === "paid" && credited === 0 && (
                 <Button variant="outline" onClick={cancel}>
                   <XCircle className="w-4 h-4 mr-1" /> Cancel
                 </Button>
               )}
               {["unpaid", "partially_paid", "overdue"].includes(invoice.status) && (
                 <>
-                  <Button variant="outline" onClick={cancel}>
-                    <XCircle className="w-4 h-4 mr-1" /> Cancel
-                  </Button>
+                  {credited === 0 && (
+                    <Button variant="outline" onClick={cancel}>
+                      <XCircle className="w-4 h-4 mr-1" /> Cancel
+                    </Button>
+                  )}
                   <Button
                     onClick={() => {
                       setPayAmount(balance);
@@ -451,6 +478,12 @@ export default function InvoiceDetailPage() {
                 <span>− {format(invoice.amountPaid)}</span>
               </div>
             )}
+            {credited > 0 && (
+              <div className="flex justify-between text-ink-soft">
+                <span>Credited</span>
+                <span>− {format(credited)}</span>
+              </div>
+            )}
             {balance > 0 && (
               <div className="flex justify-between text-danger font-medium">
                 <span>Balance Due</span>
@@ -459,6 +492,31 @@ export default function InvoiceDetailPage() {
             )}
           </div>
         </div>
+
+        {(invoice.creditNotes?.length ?? 0) > 0 && (
+          <div className="mt-10 pt-6 border-t border-border-soft">
+            <p className="text-xs font-bold uppercase tracking-wider text-ink-soft mb-3">Credit notes</p>
+            <div className="space-y-3 text-sm">
+              {invoice.creditNotes!.map((cn) => (
+                <div key={cn.id} className="rounded-lg border border-border-soft p-3">
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <span className="font-semibold">{cn.number} <span className="font-normal text-ink-soft">· {new Date(cn.createdAt).toLocaleDateString()}{cn.reason ? ` · ${cn.reason}` : ""}</span></span>
+                    <span className="font-semibold tabular-nums">{format(cn.total)}</span>
+                  </div>
+                  <ul className="mt-1.5 text-ink-soft">
+                    {cn.lines.map((l) => (
+                      <li key={l.id} className="flex justify-between gap-2">
+                        <span>{formatQty(l.quantity)} × {l.description}{l.restocked ? " (back to stock)" : " (not restocked)"}</span>
+                        <span className="tabular-nums">{format(l.total)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {cn.refundAmount > 0 && <p className="mt-1.5 text-ink-soft">Refunded {format(cn.refundAmount)}{cn.refundAccountName ? ` from ${cn.refundAccountName}` : ""}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {invoice.payments.length > 0 && (
           <div className="mt-10 pt-6 border-t border-border-soft">
@@ -612,6 +670,15 @@ export default function InvoiceDetailPage() {
         )}
         {cancelError && <p className="text-sm text-danger">{cancelError}</p>}
       </Dialog>
+
+      <CreditNoteDialog
+        open={showCredit}
+        onClose={() => setShowCredit(false)}
+        onDone={() => { setShowCredit(false); load(); }}
+        invoiceId={invoice.id}
+        invoiceNumber={invoice.invoiceNumber}
+        balance={balance}
+      />
 
       <Dialog
         open={showFinalize}

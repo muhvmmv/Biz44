@@ -51,7 +51,10 @@ router.get('/:id/summary', async (req: Request, res: Response, next: NextFunctio
     const totalPaid = invoices
       .filter((i) => i.status !== 'draft' && i.status !== 'cancelled')
       .reduce((s: number, i) => s + i.amountPaid, 0);
-    const outstanding = totalSales - totalPaid;
+    const totalCredited = invoices
+      .filter((i) => i.status !== 'draft' && i.status !== 'cancelled')
+      .reduce((s: number, i) => s + (i.creditedAmount ?? 0), 0);
+    const outstanding = totalSales - totalPaid - totalCredited;
 
     const payments = invoices
       .flatMap((i) =>
@@ -70,7 +73,7 @@ router.get('/:id/summary', async (req: Request, res: Response, next: NextFunctio
       success: true,
       data: {
         customer,
-        summary: { totalSales, totalPaid, outstanding, invoiceCount: invoices.length },
+        summary: { totalSales: totalSales - totalCredited, totalPaid, outstanding, invoiceCount: invoices.length },
         invoices,
         payments,
       },

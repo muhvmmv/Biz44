@@ -7,6 +7,7 @@ import { listPaymentAccounts, parsePositiveAmount, resolvePaymentAccount } from 
 import { postJournal, systemAccount, verifyLedger, round2, isDebitNormal, DEFAULT_ACCOUNT_KEYS } from '../../lib/ledger';
 import { profitAndLoss, balanceSheet, trialBalance, cashFlow, monthlyPnl } from '../../lib/reports';
 import { purchaseBalance } from '../purchases/purchase.service';
+import { invoiceBalance } from '../../lib/invoiceBalance';
 
 const router = Router();
 router.use(authenticate);
@@ -254,7 +255,7 @@ router.get('/vat', async (req: Request, res: Response, next: NextFunction) => {
       const key = l.entry.date.toISOString().slice(0, 7);
       const m = months.get(key) ?? { month: key, charged: 0, reversed: 0, paid: 0 };
       if (l.entry.sourceType === 'invoice') { charged += credit - debit; m.charged += credit - debit; }
-      else if (l.entry.sourceType === 'invoice_cancel') { reversed += debit - credit; m.reversed += debit - credit; }
+      else if (l.entry.sourceType === 'invoice_cancel' || l.entry.sourceType === 'credit_note') { reversed += debit - credit; m.reversed += debit - credit; }
       else if (l.entry.sourceType === 'vat_payment') {
         paid += debit - credit; m.paid += debit - credit;
         payments.push({ id: l.entry.id, date: l.entry.date, amount: round2(debit - credit), reference: l.entry.reference, description: l.entry.description });
@@ -587,7 +588,7 @@ router.get('/receivable', resolveLocation, async (req: Request, res: Response, n
     let total = 0;
 
     const rows = invoices.map((inv) => {
-      const balance = inv.total - inv.amountPaid;
+      const balance = invoiceBalance(inv);
       total += balance;
       const due = inv.dueDate ? new Date(inv.dueDate) : now;
       const diffDays = Math.floor((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
@@ -720,7 +721,7 @@ router.get('/overview', resolveLocation, async (req: Request, res: Response, nex
       profitAndLoss(companyId, { from: yearStart, to: now, locationIds }),
       prisma.invoice.findMany({
         where: { companyId, status: { in: ['unpaid', 'partially_paid', 'overdue'] }, ...locationWhere(req) },
-        select: { total: true, amountPaid: true },
+        select: { total: true, amountPaid: true, creditedAmount: true },
       }),
       prisma.purchase.findMany({
         where: { companyId, ...locationWhere(req) },
@@ -734,7 +735,7 @@ router.get('/overview', resolveLocation, async (req: Request, res: Response, nex
         ledgerStartedAt: company?.ledgerStartedAt ?? null,
         cashAccounts: cash.map((a: any) => ({ id: a.id, name: a.name, subtype: a.subtype, bankName: a.bankName, balance: round2(a.balance) })),
         totalCash: round2(cash.reduce((s: number, a: any) => s + a.balance, 0)),
-        receivables: round2(invoices.reduce((s, i) => s + (i.total - i.amountPaid), 0)),
+        receivables: round2(invoices.reduce((s, i) => s + invoiceBalance(i), 0)),
         payables: round2(purchases.reduce((s, p) => s + Math.max(0, purchaseBalance(p)), 0)),
         thisMonth: month,
         yearToDate: ytd,

@@ -9,6 +9,8 @@ import {
 } from '../../lib/accounts';
 import { postJournal, systemAccount, round2 } from '../../lib/ledger';
 import { addStock, consumeFifo, restoreToBatch, syncProductTotals, inventoryAccountFor } from '../../lib/inventory';
+import { invoiceBalance } from '../../lib/invoiceBalance';
+import { createCreditNote, creditableLines } from './creditNotes';
 const router = Router();
 
 router.use(authenticate);
@@ -80,10 +82,11 @@ async function recordInvoicePayment(
   args: { invoice: any; amount: number; account: any; method?: string; reference?: string | null; notes?: string | null; userId: string }
 ) {
   const { invoice, amount, account } = args;
-  const current = await tx.invoice.findUnique({ where: { id: invoice.id }, select: { amountPaid: true, total: true } });
+  const current = await tx.invoice.findUnique({ where: { id: invoice.id }, select: { amountPaid: true, total: true, creditedAmount: true } });
   const newPaid = round2(current.amountPaid + amount);
-  if (newPaid > current.total + 0.01) throw badRequest('Payment is more than the balance due');
-  const status = newPaid >= current.total - 0.01 ? 'paid' : 'partially_paid';
+  const left = invoiceBalance({ ...current, amountPaid: newPaid });
+  if (left < -0.01) throw badRequest('Payment is more than the balance due');
+  const status = left <= 0.01 ? 'paid' : 'partially_paid';
   await tx.payment.create({
     data: {
       companyId: invoice.companyId,
@@ -177,6 +180,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
         customer: true,
         items: { include: { product: { select: { name: true, sku: true, unit: true } } } },
         payments: true,
+        creditNotes: { include: { lines: true }, orderBy: { createdAt: 'asc' } },
       },
     });
     if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
@@ -414,7 +418,7 @@ router.post('/:id/payment', async (req: Request, res: Response, next: NextFuncti
         `Payments cannot be recorded on a ${invoice.status} invoice`;
       throw badRequest(reason);
     }
-    const balance = invoice.total - invoice.amountPaid;
+    const balance = invoiceBalance(invoice);
     if (amount > balance + 0.01) {
       throw badRequest(`Amount is more than the balance due (${balance.toFixed(2)})`);
     }
@@ -453,6 +457,9 @@ router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunctio
     if (!invoice) return res.status(404).json({ success: false, message: 'Not found' });
     if (invoice.status === 'cancelled') {
       return res.status(400).json({ success: false, message: 'Already cancelled' });
+    }
+    if ((invoice.creditedAmount ?? 0) > 0) {
+      throw badRequest('This invoice has credit notes. Credit the remaining items with a new credit note instead of cancelling it.');
     }
 
     const paid = Math.round(invoice.amountPaid * 100) / 100;
@@ -557,6 +564,23 @@ router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunctio
 
     res.json({ success: true });
   } catch (err) { next(err); }
+});
+
+// ---------- CREDIT NOTES (returns and credits) ----------
+router.get('/:id/creditable', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ success: true, data: await creditableLines(req.user!.companyId, req.params.id) });
+  } catch (err) { next(err); }
+});
+
+router.post('/:id/credit-notes', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const note = await createCreditNote(req.user!.companyId, req.params.id, req.user!.id, req.body ?? {});
+    res.status(201).json({ success: true, data: note });
+  } catch (err: any) {
+    if (err?.code === 'P2002') return next(badRequest('Another credit note was saved at the same moment. Please try again.'));
+    next(err);
+  }
 });
 
 // ---------- DELETE (only drafts) ----------

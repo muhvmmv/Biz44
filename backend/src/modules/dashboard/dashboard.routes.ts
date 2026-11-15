@@ -11,6 +11,7 @@ import { runStockCheck } from '../../lib/stockCheck';
 import { productionSummary } from '../production/production.service';
 import { Area, can } from '../../lib/permissions';
 import { AppError } from '../../lib/errors';
+import { invoiceBalance } from '../../lib/invoiceBalance';
 const router = Router();
 
 /** Figures each area owns on the dashboard summary; hidden (null) without access. */
@@ -68,7 +69,7 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
     const dueTodayInvoices = unpaidInvoices.filter(
       (i) => i.dueDate && new Date(i.dueDate).toDateString() === now.toDateString()
     );
-    const outstanding = unpaidInvoices.reduce((s, i) => s + (i.total - i.amountPaid), 0);
+    const outstanding = unpaidInvoices.reduce((s, i) => s + invoiceBalance(i), 0);
 
     const revenueChange = lastMonth.revenue !== 0
       ? ((thisMonth.revenue - lastMonth.revenue) / Math.abs(lastMonth.revenue)) * 100
@@ -176,7 +177,7 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
         lowStock,
         outOfStock,
         dueToday: dueTodayInvoices.length,
-        expectedToday: dueTodayInvoices.reduce((s, i) => s + (i.total - i.amountPaid), 0),
+        expectedToday: dueTodayInvoices.reduce((s, i) => s + invoiceBalance(i), 0),
         topProducts,
         // NEW: supplier payable metrics
         supplierOutstanding,
@@ -212,7 +213,7 @@ router.get('/alerts', resolveLocation, async (req: Request, res: Response, next:
     const [openInvoices, purchases, products, stock, cashAccounts, stockReport] = await Promise.all([
       prisma.invoice.findMany({
         where: { companyId, status: { in: ['unpaid', 'partially_paid', 'overdue'] }, ...locFilter },
-        select: { total: true, amountPaid: true, dueDate: true },
+        select: { total: true, amountPaid: true, creditedAmount: true, dueDate: true },
       }),
       prisma.purchase.findMany({
         where: { companyId, ...locFilter },
@@ -233,7 +234,7 @@ router.get('/alerts', resolveLocation, async (req: Request, res: Response, next:
       alerts.push({
         id: 'invoices-overdue', severity: 'danger', count: overdue.length,
         title: `${overdue.length} overdue invoice${overdue.length === 1 ? '' : 's'}`,
-        amount: money(overdue.reduce((s, i) => s + i.total - i.amountPaid, 0)), detail: 'still to collect',
+        amount: money(overdue.reduce((s, i) => s + invoiceBalance(i), 0)), detail: 'still to collect',
         href: '/dashboard/accounting/receivable',
       });
     }
@@ -242,7 +243,7 @@ router.get('/alerts', resolveLocation, async (req: Request, res: Response, next:
       alerts.push({
         id: 'invoices-due-today', severity: 'info', count: dueToday.length,
         title: `${dueToday.length} invoice${dueToday.length === 1 ? '' : 's'} due today`,
-        amount: money(dueToday.reduce((s, i) => s + i.total - i.amountPaid, 0)), detail: 'expected today',
+        amount: money(dueToday.reduce((s, i) => s + invoiceBalance(i), 0)), detail: 'expected today',
         href: '/dashboard/invoices',
       });
     }

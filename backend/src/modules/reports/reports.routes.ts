@@ -8,6 +8,7 @@ import { monthlyPnl, profitAndLoss } from '../../lib/reports';
 import { round2 } from '../../lib/ledger';
 import { badRequest } from '../../lib/errors';
 import { productionSummary } from '../production/production.service';
+import { invoiceBalance } from '../../lib/invoiceBalance';
 const router = Router();
 
 router.use(authenticate);
@@ -73,7 +74,7 @@ router.get('/top-customers', async (req, res, next) => {
       }
       map[key].total += inv.total;
       map[key].invoices += 1;
-      map[key].outstanding += inv.total - inv.amountPaid;
+      map[key].outstanding += invoiceBalance(inv);
     }
     const data = Object.values(map).sort((a, b) => b.total - a.total);
     res.json({ success: true, data });
@@ -192,6 +193,22 @@ router.get('/product-margins', resolveLocation, async (req, res, next) => {
         }
         rows.set(key, row);
       }
+    }
+    // Credit notes on these invoices take back their sales and, for goods put
+    // back into stock, their cost.
+    const credits = invoices.length
+      ? await prisma.creditNoteLine.findMany({
+          where: { creditNote: { invoiceId: { in: invoices.map((i) => i.id) } } },
+          include: { invoiceItem: { select: { productId: true, description: true } } },
+        })
+      : [];
+    for (const c of credits) {
+      const key = c.invoiceItem.productId ?? `custom:${c.invoiceItem.description}`;
+      const row = rows.get(key);
+      if (!row) continue;
+      row.quantity -= c.quantity;
+      row.revenue -= c.total;
+      row.cost -= c.cost;
     }
     const data = Array.from(rows.values())
       .map((r) => {
