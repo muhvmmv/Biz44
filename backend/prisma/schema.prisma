@@ -15,7 +15,10 @@ model User {
   password       String
   companyId      String
   company        Company              @relation(fields: [companyId], references: [id])
+  /// admin, manager, accountant, storekeeper or sales (see src/lib/permissions.ts)
   role           String               @default("admin")
+  /// Deactivated users cannot sign in; their history is kept.
+  isActive       Boolean              @default(true)
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
   locationAccess UserLocationAccess[]
@@ -50,6 +53,8 @@ model Company {
   locations           Location[]
   purchasePayments    PurchasePayment[]
   journalEntries      JournalEntry[]
+  boms                Bom[]
+  productionOrders    ProductionOrder[]
   /// When this company switched to the double-entry journal. Account balances
   /// at that moment were carried in as an opening entry; P&L history before
   /// it comes from the older transaction records.
@@ -58,8 +63,13 @@ model Company {
   industry            String?
   country             String?
   currency            String            @default("USD")
+  /// VAT charged on sales, in percent (0 = not charging VAT).
+  vatRate             Float             @default(0)
+  vatNumber           String?
   teamSize            String?
   onboardingCompleted Boolean           @default(false)
+  stockTransfers      StockTransfer[]
+  creditNotes         CreditNote[]
 }
 
 model Customer {
@@ -115,23 +125,33 @@ model Employee {
 }
 
 model Product {
-  id             String           @id @default(uuid())
-  companyId      String
-  company        Company          @relation(fields: [companyId], references: [id])
-  name           String
-  sku            String?
-  description    String?
-  price          Float            @default(0)
-  cost           Float            @default(0)
-  totalCostValue Float            @default(0)
-  quantity       Int              @default(0)
-  reorderPoint   Int              @default(0)
-  invoiceItems   InvoiceItem[]
-  stockMovements StockMovement[]
-  purchaseItems  PurchaseItem[]
-  batches        InventoryBatch[]
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  id                  String               @id @default(uuid())
+  companyId           String
+  company             Company              @relation(fields: [companyId], references: [id])
+  name                String
+  sku                 String?
+  description         String?
+  price               Float                @default(0)
+  cost                Float                @default(0)
+  totalCostValue      Float                @default(0)
+  quantity            Float                @default(0)
+  reorderPoint        Float                @default(0)
+  /// raw_material | packaging | finished_good
+  itemType            String               @default("finished_good")
+  /// Unit of measure, e.g. pcs, kg, g, l, ml, bag, roll, carton
+  unit                String               @default("pcs")
+  invoiceItems        InvoiceItem[]
+  stockMovements      StockMovement[]
+  purchaseItems       PurchaseItem[]
+  batches             InventoryBatch[]
+  boms                Bom[]
+  bomComponents       BomLine[]
+  productionOrders    ProductionOrder[]    @relation("ProductionOutput")
+  productionMaterials ProductionMaterial[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  transferLines StockTransferLine[]
 
   @@map("products")
 }
@@ -148,6 +168,8 @@ model Purchase {
   date           DateTime          @default(now())
   dueDate        DateTime?
   subtotal       Float             @default(0)
+  /// VAT charged by the supplier (recoverable input VAT); total = subtotal + taxTotal.
+  taxTotal       Float             @default(0)
   total          Float             @default(0)
   amountPaid     Float             @default(0)
   /// Value of goods returned to the supplier and deducted from this purchase.
@@ -172,7 +194,7 @@ model PurchaseItem {
   purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
   productId  String
   product    Product  @relation(fields: [productId], references: [id])
-  quantity   Int
+  quantity   Float
   unitCost   Float
   total      Float
 
@@ -197,6 +219,8 @@ model Invoice {
   subtotal        Float         @default(0)
   discountTotal   Float         @default(0)
   taxTotal        Float         @default(0)
+  /// VAT rate applied to this invoice, in percent.
+  taxRate         Float         @default(0)
   total           Float         @default(0)
   amountPaid      Float         @default(0)
   notes           String?
@@ -206,6 +230,10 @@ model Invoice {
   updatedAt       DateTime      @updatedAt
   items           InvoiceItem[]
   payments        Payment[]
+
+  /// Total of credit notes against this invoice.
+  creditedAmount Float        @default(0)
+  creditNotes    CreditNote[]
 
   @@unique([companyId, invoiceNumber])
   @@index([companyId, locationId])
@@ -219,9 +247,11 @@ model InvoiceItem {
   productId   String?
   product     Product? @relation(fields: [productId], references: [id])
   description String
-  quantity    Int      @default(1)
+  quantity    Float    @default(1)
   unitPrice   Float    @default(0)
   total       Float    @default(0)
+
+  creditLines CreditNoteLine[]
 
   @@map("invoice_items")
 }
@@ -344,8 +374,8 @@ model StockMovement {
   batchId    String?
   batch      InventoryBatch? @relation(fields: [batchId], references: [id])
   type       String
-  quantity   Int
-  balance    Int
+  quantity   Float
+  balance    Float
   unitCost   Float           @default(0)
   totalCost  Float           @default(0)
   reference  String?
@@ -359,26 +389,30 @@ model StockMovement {
 }
 
 model InventoryBatch {
-  id                   String          @id @default(uuid())
+  id                   String            @id @default(uuid())
   companyId            String
-  company              Company         @relation(fields: [companyId], references: [id])
+  company              Company           @relation(fields: [companyId], references: [id])
   locationId           String?
-  location             Location?       @relation(fields: [locationId], references: [id])
+  location             Location?         @relation(fields: [locationId], references: [id])
   productId            String
-  product              Product         @relation(fields: [productId], references: [id])
+  product              Product           @relation(fields: [productId], references: [id])
   supplierId           String?
-  supplier             Supplier?       @relation(fields: [supplierId], references: [id])
+  supplier             Supplier?         @relation(fields: [supplierId], references: [id])
   purchaseId           String?
-  purchase             Purchase?       @relation(fields: [purchaseId], references: [id])
-  quantityReceived     Int
-  quantityRemaining    Int
+  purchase             Purchase?         @relation(fields: [purchaseId], references: [id])
+  quantityReceived     Float
+  quantityRemaining    Float
+  /// Set on finished goods made by a production order (traceability).
+  productionOrderId    String?
+  productionOrder      ProductionOrder?  @relation(fields: [productionOrderId], references: [id])
+  productionIssues     ProductionIssue[]
   unitCost             Float
-  sellingPriceSnapshot Float           @default(0)
+  sellingPriceSnapshot Float             @default(0)
   reference            String?
-  receivedAt           DateTime        @default(now())
-  isLegacy             Boolean         @default(false)
-  createdAt            DateTime        @default(now())
-  updatedAt            DateTime        @updatedAt
+  receivedAt           DateTime          @default(now())
+  isLegacy             Boolean           @default(false)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
   stockMovements       StockMovement[]
 
   @@index([productId, receivedAt])
@@ -482,6 +516,12 @@ model Location {
   payrolls         Payroll[]
   purchasePayments PurchasePayment[]
   journalEntries   JournalEntry[]
+  productionOrders ProductionOrder[]
+
+  transfersOut StockTransfer[] @relation("TransferFrom")
+  transfersIn  StockTransfer[] @relation("TransferTo")
+
+  creditNotes CreditNote[]
 
   @@index([companyId, status])
   @@map("locations")
@@ -520,4 +560,193 @@ model PurchasePayment {
   @@index([purchaseId])
   @@index([companyId, paidAt])
   @@map("purchase_payments")
+}
+
+/// Bill of materials: what it takes to make `outputQuantity` units of a product.
+model Bom {
+  id             String    @id @default(uuid())
+  companyId      String
+  company        Company   @relation(fields: [companyId], references: [id])
+  productId      String
+  product        Product   @relation(fields: [productId], references: [id])
+  /// The quantity of finished product the lines below produce (e.g. 1 or 100).
+  outputQuantity Float     @default(1)
+  notes          String?
+  lines          BomLine[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([companyId, productId])
+  @@map("boms")
+}
+
+model BomLine {
+  id           String  @id @default(uuid())
+  bomId        String
+  bom          Bom     @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  componentId  String
+  component    Product @relation(fields: [componentId], references: [id])
+  /// Quantity of the component needed for the BOM's outputQuantity.
+  quantity     Float
+  /// Expected extra usage for normal waste, e.g. 2 = 2% more.
+  scrapPercent Float   @default(0)
+  sortOrder    Int     @default(0)
+
+  @@map("bom_lines")
+}
+
+/// One production run: materials go into work in progress, finished goods come out.
+model ProductionOrder {
+  id               String               @id @default(uuid())
+  companyId        String
+  company          Company              @relation(fields: [companyId], references: [id])
+  locationId       String?
+  location         Location?            @relation(fields: [locationId], references: [id])
+  /// MO-0001, unique per company
+  number           String
+  productId        String
+  product          Product              @relation("ProductionOutput", fields: [productId], references: [id])
+  /// draft | in_progress | completed | cancelled
+  status           String               @default("draft")
+  plannedQuantity  Float
+  producedQuantity Float                @default(0)
+  /// Cost of materials issued and not returned (the work-in-progress value).
+  materialCost     Float                @default(0)
+  /// Cost per good unit produced (set on completion).
+  unitCost         Float                @default(0)
+  plannedDate      DateTime?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  cancelledAt      DateTime?
+  notes            String?
+  createdById      String?
+  materials        ProductionMaterial[]
+  outputBatches    InventoryBatch[]
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+  @@map("production_orders")
+}
+
+/// A material on a production order: planned from the BOM, issued as used.
+model ProductionMaterial {
+  id              String            @id @default(uuid())
+  orderId         String
+  order           ProductionOrder   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product           @relation(fields: [productId], references: [id])
+  plannedQuantity Float             @default(0)
+  issuedQuantity  Float             @default(0)
+  issuedCost      Float             @default(0)
+  issues          ProductionIssue[]
+
+  @@unique([orderId, productId])
+  @@map("production_materials")
+}
+
+/// Exactly which stock batch each issued quantity came from (traceability;
+/// unused material goes back to the same batch at the same cost).
+model ProductionIssue {
+  id         String             @id @default(uuid())
+  materialId String
+  material   ProductionMaterial @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  batchId    String
+  batch      InventoryBatch     @relation(fields: [batchId], references: [id])
+  /// Positive when issued; negative when returned.
+  quantity   Float
+  unitCost   Float
+  createdAt  DateTime           @default(now())
+
+  @@index([materialId])
+  @@map("production_issues")
+}
+
+/// Stock moved from one location to another. Batches keep their cost,
+/// received date and source, so the company's stock value does not change.
+model StockTransfer {
+  id             String              @id @default(uuid())
+  companyId      String
+  company        Company             @relation(fields: [companyId], references: [id])
+  /// TR-0001, TR-0002, … per company
+  number         String
+  fromLocationId String
+  fromLocation   Location            @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  toLocationId   String
+  toLocation     Location            @relation("TransferTo", fields: [toLocationId], references: [id])
+  notes          String?
+  createdById    String?
+  createdAt      DateTime            @default(now())
+  lines          StockTransferLine[]
+
+  @@unique([companyId, number])
+  @@index([companyId, createdAt])
+  @@map("stock_transfers")
+}
+
+model StockTransferLine {
+  id         String        @id @default(uuid())
+  transferId String
+  transfer   StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product       @relation(fields: [productId], references: [id])
+  quantity   Float
+  /// Cost of the batches moved (unchanged by the move).
+  totalCost  Float         @default(0)
+
+  @@map("stock_transfer_lines")
+}
+
+/// Goods returned by a customer, or a credit for part of an invoice. The
+/// invoice itself is never changed: its balance is total - amountPaid -
+/// creditedAmount.
+model CreditNote {
+  id                String           @id @default(uuid())
+  companyId         String
+  company           Company          @relation(fields: [companyId], references: [id])
+  locationId        String?
+  location          Location?        @relation(fields: [locationId], references: [id])
+  invoiceId         String
+  invoice           Invoice          @relation(fields: [invoiceId], references: [id])
+  /// CN-0001, CN-0002, … per company
+  number            String
+  reason            String?
+  /// Value of the lines after the invoice's discount, before VAT.
+  subtotal          Float
+  taxTotal          Float            @default(0)
+  total             Float
+  /// Part of the total that reduced what the customer owed.
+  appliedAmount     Float            @default(0)
+  /// Part of the total paid back to the customer.
+  refundAmount      Float            @default(0)
+  refundAccountName String?
+  /// Cost of the goods put back into stock.
+  costReturned      Float            @default(0)
+  createdById       String?
+  createdAt         DateTime         @default(now())
+  lines             CreditNoteLine[]
+
+  @@unique([companyId, number])
+  @@index([invoiceId])
+  @@map("credit_notes")
+}
+
+model CreditNoteLine {
+  id            String      @id @default(uuid())
+  creditNoteId  String
+  creditNote    CreditNote  @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+  invoiceItemId String
+  invoiceItem   InvoiceItem @relation(fields: [invoiceItemId], references: [id])
+  productId     String?
+  description   String
+  quantity      Float
+  /// Price per unit after the invoice's discount, before VAT.
+  unitPrice     Float
+  total         Float
+  /// Put back into stock (false for damaged goods that are only credited).
+  restocked     Boolean     @default(true)
+  cost          Float       @default(0)
+
+  @@map("credit_note_lines")
 }

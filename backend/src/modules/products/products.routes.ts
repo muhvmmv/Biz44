@@ -4,7 +4,11 @@ import { resolveLocation, requireTargetLocation } from '../../middleware/locatio
 import { CrudService, pick } from '../../services/crud.service';
 import { prisma } from '../../lib/prisma';
 import { badRequest } from '../../lib/errors';
-import { addStock, postOpeningStock, syncProductTotals, stockByProduct } from '../../lib/inventory';
+import {
+  addStock, postOpeningStock, syncProductTotals, stockByProduct, inventoryAccountFor, stageKeyFor, ITEM_TYPES,
+} from '../../lib/inventory';
+import { parseQuantity } from '../../lib/accounts';
+import { postJournal } from '../../lib/ledger';
 
 const router = Router();
 const productService = new CrudService('product');
@@ -14,7 +18,9 @@ router.use(authenticate);
 // `quantity` and `totalCostValue` are deliberately NOT writable here. Stock
 // may only change through receiving, sales, adjustments, damage and returns,
 // so every change has a stock movement and a cost.
-const WRITABLE = ['name', 'sku', 'description', 'price', 'cost', 'reorderPoint'] as const;
+const WRITABLE = ['name', 'sku', 'description', 'price', 'cost', 'reorderPoint', 'itemType', 'unit'] as const;
+
+export const UNITS = ['pcs', 'kg', 'g', 't', 'l', 'ml', 'm', 'bag', 'roll', 'carton', 'pack', 'box'] as const;
 
 function normalize(data: Record<string, any>) {
   for (const key of ['price', 'cost'] as const) {
@@ -24,10 +30,13 @@ function normalize(data: Record<string, any>) {
       data[key] = n;
     }
   }
-  if (data.reorderPoint !== undefined) {
-    const n = Number(data.reorderPoint);
-    if (!Number.isInteger(n) || n < 0) throw badRequest('reorderPoint must be a whole number of 0 or more');
-    data.reorderPoint = n;
+  if (data.reorderPoint !== undefined) data.reorderPoint = parseQuantity(data.reorderPoint, 'Reorder point');
+  if (data.itemType !== undefined && !(ITEM_TYPES as readonly string[]).includes(data.itemType)) {
+    throw badRequest('Item type must be raw_material, packaging or finished_good');
+  }
+  if (data.unit !== undefined) {
+    data.unit = String(data.unit).trim().toLowerCase();
+    if (!(UNITS as readonly string[]).includes(data.unit)) throw badRequest(`Unit must be one of: ${UNITS.join(', ')}`);
   }
   return data;
 }
@@ -53,14 +62,16 @@ async function withLocationStock(req: Request, products: any[]) {
       quantity: here.quantity,
       totalCostValue: here.value,
       recordedQuantity: p.quantity,
-      needsStockCheck: p.quantity !== all.quantity,
+      needsStockCheck: Math.abs(p.quantity - all.quantity) > 0.0001,
     };
   });
 }
 
 router.get('/', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const products = await productService.findMany(req.user!.companyId, { orderBy: { name: 'asc' } });
+    const type = typeof req.query.type === 'string' ? req.query.type : '';
+    const products = (await productService.findMany(req.user!.companyId, { orderBy: { name: 'asc' } }))
+      .filter((p: { itemType: string }) => !type || type.split(',').includes(p.itemType));
     res.json({ success: true, data: await withLocationStock(req, products) });
   } catch (err) { next(err); }
 });
@@ -74,10 +85,8 @@ router.post('/', resolveLocation, async (req: Request, res: Response, next: Next
     const data = normalize(pick(req.body, WRITABLE));
     if (!data.name || !String(data.name).trim()) throw badRequest('Product name is required');
 
-    const openingQty = req.body?.quantity === undefined || req.body?.quantity === '' ? 0 : Number(req.body.quantity);
-    if (!Number.isInteger(openingQty) || openingQty < 0) {
-      throw badRequest('Opening quantity must be a whole number of 0 or more');
-    }
+    const openingQty =
+      req.body?.quantity === undefined || req.body?.quantity === '' ? 0 : parseQuantity(req.body.quantity, 'Opening quantity');
     const unitCost = data.cost ?? 0;
     // Opening stock must go to a specific location.
     const locationId = openingQty > 0 ? requireTargetLocation(req) : null;
@@ -99,7 +108,7 @@ router.post('/', resolveLocation, async (req: Request, res: Response, next: Next
           reference: 'Opening stock',
         });
         await postOpeningStock(tx, {
-          companyId, locationId, amount: totalCost, description: `Opening stock: ${created.name}`, sourceId: created.id,
+          companyId, locationId, itemType: created.itemType, amount: totalCost, description: `Opening stock: ${created.name}`, sourceId: created.id,
         });
         await syncProductTotals(tx, companyId, [created.id]);
       }
@@ -121,9 +130,34 @@ router.get('/:id', resolveLocation, async (req: Request, res: Response, next: Ne
 
 router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const companyId = req.user!.companyId;
     const data = normalize(pick(req.body, WRITABLE));
     if (data.name !== undefined && !String(data.name).trim()) throw badRequest('Product name is required');
-    const product = await productService.update(req.params.id, req.user!.companyId, data);
+    const existing = await productService.findOne(req.params.id, companyId);
+
+    const product = await prisma.$transaction(async (tx) => {
+      // Changing the item type moves its stock value between inventory
+      // accounts (e.g. finished goods -> raw materials) with one journal entry.
+      if (data.itemType && stageKeyFor(data.itemType) !== stageKeyFor(existing.itemType)) {
+        const value = (await stockByProduct(tx, companyId, null, [existing.id])).get(existing.id)?.value ?? 0;
+        if (value > 0) {
+          const from = await inventoryAccountFor(tx, companyId, existing.itemType);
+          const to = await inventoryAccountFor(tx, companyId, data.itemType);
+          await postJournal(tx, {
+            companyId,
+            description: `Reclassify ${existing.name} as ${String(data.itemType).replace('_', ' ')}`,
+            sourceType: 'stock_reclass',
+            sourceId: existing.id,
+            createdById: req.user!.id,
+            lines: [
+              { accountId: to.id, debit: value },
+              { accountId: from.id, credit: value },
+            ],
+          });
+        }
+      }
+      return tx.product.update({ where: { id: existing.id }, data });
+    });
     res.json({ success: true, data: product });
   } catch (err) { next(err); }
 });

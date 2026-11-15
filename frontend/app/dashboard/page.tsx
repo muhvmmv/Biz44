@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
@@ -19,6 +20,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useLocationVersion } from "@/hooks/useLocationRefetch";
 import { getBusinessConfig } from "@/lib/business-config";
+import { formatQty } from "@/lib/units";
+import { can } from "@/lib/permissions";
 
 interface DashboardSummary {
   revenue: number;
@@ -51,6 +54,15 @@ interface DashboardSummary {
   supplierUnpaidCount: number;
   supplierOverdueAmount: number;
   supplierOverdueCount: number;
+  inventoryByStage?: { raw: number; wip: number; finished: number };
+  production?: {
+    completedOrders: number;
+    inProgressOrders: number;
+    draftOrders: number;
+    totalCost: number;
+    wipValue: number;
+    products: { name: string; unit: string; produced: number; unitCost: number; yieldPercent: number | null }[];
+  };
 }
 
 interface RecentInvoice {
@@ -92,6 +104,9 @@ export default function DashboardPage() {
   const { format, currency } = useCurrency();
   const version = useLocationVersion();
   const config = getBusinessConfig(user?.businessType);
+  const perms = user?.permissions;
+  const canMoney = can(perms, "money");
+  const canSales = can(perms, "sales");
 
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [chartData, setChartData] = useState<{
@@ -110,16 +125,16 @@ export default function DashboardPage() {
 
     Promise.all([
       apiFetch<{ success: boolean; data: DashboardSummary }>(`/dashboard/summary?months=${range}`),
-      apiFetch<{ success: boolean; data: typeof chartData }>(
-        `/dashboard/monthly-chart?months=${range}`
-      ),
+      canMoney
+        ? apiFetch<{ success: boolean; data: typeof chartData }>(`/dashboard/monthly-chart?months=${range}`)
+        : Promise.resolve({ success: true, data: [] as typeof chartData }),
     ])
       .then(([s, c]) => {
         if (!active) return;
         setSummary(s.data);
         setChartData(c.data);
       })
-      .catch(console.error)
+      .catch((e: unknown) => reportError(e, "Could not load this page"))
       .finally(() => {
         if (active) setLoading(false);
       });
@@ -127,7 +142,7 @@ export default function DashboardPage() {
     return () => {
       active = false;
     };
-  }, [range, version]);
+  }, [range, version, canMoney]);
 
   return (
     <div className="space-y-6">
@@ -155,11 +170,13 @@ export default function DashboardPage() {
             <option value={6}>Last 6 months</option>
             <option value={12}>Last 12 months</option>
           </select>
-          <Link href="/dashboard/invoices/new">
-            <Button>
-              <Plus className="w-4 h-4 mr-1" /> Create Invoice
-            </Button>
-          </Link>
+          {can(perms, "sales", "write") && (
+            <Link href="/dashboard/invoices/new">
+              <Button>
+                <Plus className="w-4 h-4 mr-1" /> Create Invoice
+              </Button>
+            </Link>
+          )}
         </div>
       </div>
 
@@ -172,6 +189,7 @@ export default function DashboardPage() {
       ) : summary ? (
         <>
           {/* KPI CARDS */}
+          {canMoney && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <KpiCard
               title={range === 1 ? "Revenue this month" : `Revenue · ${range} months`}
@@ -210,8 +228,10 @@ export default function DashboardPage() {
               href="/dashboard/accounting/receivable"
             />
           </div>
+          )}
 
           {/* CASH POSITION */}
+          {canMoney && (
           <Card>
             <CardHeader>
               <CardTitle>Cash position</CardTitle>
@@ -243,8 +263,14 @@ export default function DashboardPage() {
               </div>
             </CardContent>
           </Card>
+          )}
+
+          {summary.inventoryByStage && summary.production && (
+            <FactoryOverview stages={summary.inventoryByStage} production={summary.production} format={format} />
+          )}
 
           {/* CHARTS */}
+          {canMoney && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <Card className="lg:col-span-2">
               <CardHeader>
@@ -341,6 +367,8 @@ export default function DashboardPage() {
             </Card>
           </div>
 
+          )}
+
           {/* NEEDS ATTENTION — now 4 columns including supplier outstanding */}
           <Card>
             <CardHeader>
@@ -350,12 +378,15 @@ export default function DashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {summary.overdueCount !== null && (
               <AttentionItem
                 label="Overdue invoices"
                 value={summary.overdueCount || "All clear"}
                 variant={summary.overdueCount > 0 ? "danger" : "success"}
                 href="/dashboard/accounting/receivable"
               />
+              )}
+              {summary.supplierUnpaidCount !== null && (
               <AttentionItem
                 label="Supplier payments due"
                 value={
@@ -379,36 +410,129 @@ export default function DashboardPage() {
                     : undefined
                 }
               />
+              )}
+              {summary.lowStock !== null && (
               <AttentionItem
                 label="Low stock products"
                 value={summary.lowStock || "All clear"}
                 variant={summary.lowStock > 0 ? "warning" : "success"}
                 href="/dashboard/inventory/products"
               />
+              )}
+              {summary.dueToday !== null && (
               <AttentionItem
                 label={`Due today — ${format(summary.expectedToday)}`}
                 value={summary.dueToday || "None"}
                 variant={summary.dueToday > 0 ? "info" : "success"}
                 href="/dashboard/invoices"
               />
+              )}
             </CardContent>
           </Card>
 
           {/* QUICK ACTIONS */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <QuickAction label="New Invoice" icon={<Plus className="w-5 h-5" />} href="/dashboard/invoices/new" />
-            <QuickAction label="Add Customer" icon={<Users className="w-5 h-5" />} href="/dashboard/customers" />
-            <QuickAction label="Add Product" icon={<Package className="w-5 h-5" />} href="/dashboard/inventory/products" />
-            <QuickAction label="Receive Inventory" icon={<ShoppingCart className="w-5 h-5" />} href="/dashboard/inventory/receive" />
-            <QuickAction label="Record Expense" icon={<Receipt className="w-5 h-5" />} href="/dashboard/accounting/expenses" />
+            {can(perms, "sales", "write") && <QuickAction label="New Invoice" icon={<Plus className="w-5 h-5" />} href="/dashboard/invoices/new" />}
+            {can(perms, "sales", "write") && <QuickAction label="Add Customer" icon={<Users className="w-5 h-5" />} href="/dashboard/customers?new=1" />}
+            {can(perms, "inventory", "write") && <QuickAction label="Add Product" icon={<Package className="w-5 h-5" />} href="/dashboard/inventory/products?new=1" />}
+            {can(perms, "purchasing", "write") && <QuickAction label="Receive Inventory" icon={<ShoppingCart className="w-5 h-5" />} href="/dashboard/inventory/receive" />}
+            {can(perms, "money", "write") && <QuickAction label="Record Expense" icon={<Receipt className="w-5 h-5" />} href="/dashboard/accounting/expenses?new=1" />}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <RecentInvoices version={version} format={format} />
-            <TopCustomers />
-          </div>
+          {canSales && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <RecentInvoices version={version} format={format} />
+              <TopCustomers />
+            </div>
+          )}
         </>
       ) : null}
+    </div>
+  );
+}
+
+function FactoryOverview({
+  stages,
+  production,
+  format,
+}: {
+  stages: NonNullable<DashboardSummary["inventoryByStage"]>;
+  production: NonNullable<DashboardSummary["production"]>;
+  format: (n: number) => string;
+}) {
+  const total = stages.raw + stages.wip + stages.finished;
+  const parts = [
+    { key: "raw", label: "Raw materials & packaging", value: stages.raw, color: "bg-charcoal" },
+    { key: "wip", label: "Work in progress", value: stages.wip, color: "bg-brand-dark" },
+    { key: "finished", label: "Finished goods", value: stages.finished, color: "bg-brand" },
+  ];
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Inventory by stage</CardTitle>
+          <Link href="/dashboard/inventory/products" className="text-sm text-brand-dark hover:underline">Products</Link>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-2xl font-bold tabular-nums">{format(total)}</p>
+          <div className="flex h-2.5 overflow-hidden rounded-full bg-surface-muted" aria-hidden>
+            {total > 0 && parts.map((p) => (
+              <div key={p.key} className={p.color} style={{ width: `${(p.value / total) * 100}%` }} />
+            ))}
+          </div>
+          <ul className="space-y-2 text-sm">
+            {parts.map((p) => (
+              <li key={p.key} className="flex items-center justify-between gap-3">
+                <span className="flex items-center gap-2 text-ink-soft">
+                  <span className={`h-2.5 w-2.5 rounded-full ${p.color}`} /> {p.label}
+                </span>
+                <span className="tabular-nums font-medium">{format(p.value)}</span>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Production this month</CardTitle>
+          <Link href="/dashboard/production" className="text-sm text-brand-dark hover:underline">Production</Link>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-3 gap-3 text-sm">
+            <div>
+              <p className="text-ink-soft">Completed</p>
+              <p className="text-xl font-bold tabular-nums">{production.completedOrders}</p>
+            </div>
+            <div>
+              <p className="text-ink-soft">Running</p>
+              <p className="text-xl font-bold tabular-nums">{production.inProgressOrders}</p>
+              {production.draftOrders > 0 && <p className="text-xs text-ink-soft">{production.draftOrders} planned</p>}
+            </div>
+            <div>
+              <p className="text-ink-soft">Cost</p>
+              <p className="text-xl font-bold tabular-nums">{format(production.totalCost)}</p>
+            </div>
+          </div>
+          {production.products.length === 0 ? (
+            <p className="text-sm text-ink-soft">No production completed this month yet.</p>
+          ) : (
+            <ul className="divide-y divide-border-soft text-sm">
+              {production.products.slice(0, 4).map((p) => (
+                <li key={p.name} className="flex items-center justify-between gap-3 py-2">
+                  <span>
+                    <span className="font-medium">{p.name}</span>
+                    <span className="block text-xs text-ink-soft">
+                      {formatQty(p.produced, p.unit)}
+                      {p.yieldPercent !== null ? ` · ${p.yieldPercent}% yield` : ""}
+                    </span>
+                  </span>
+                  <span className="tabular-nums text-ink-soft">{format(p.unitCost)} / {p.unit}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

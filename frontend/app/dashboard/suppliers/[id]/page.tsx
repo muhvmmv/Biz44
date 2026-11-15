@@ -3,7 +3,10 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
+import { ButtonLink } from "@/components/ui/Button";
+import { FileText } from "lucide-react";
 import Skeleton from "@/components/ui/Skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { useCurrency } from "@/hooks/useCurrency";
@@ -60,7 +63,7 @@ export default function SupplierDetailPage() {
     let active = true;
     apiFetch<{ success: boolean; data: Data }>(`/suppliers/${id}/summary`)
       .then((res) => { if (active) setData(res.data); })
-      .catch(console.error)
+      .catch((e: unknown) => reportError(e, "Could not load this page"))
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [id]);
@@ -75,6 +78,7 @@ export default function SupplierDetailPage() {
       <PageHeader
         title={supplier.name}
         description={`Supplier since ${new Date(supplier.createdAt).toLocaleDateString()}`}
+        actions={<ButtonLink href={`/dashboard/suppliers/${supplier.id}/statement`} variant="outline"><FileText size={16} /> Statement</ButtonLink>}
       />
 
       {/* Summary cards */}

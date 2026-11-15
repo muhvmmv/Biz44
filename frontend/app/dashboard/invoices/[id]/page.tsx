@@ -6,6 +6,7 @@ import Dialog from "@/components/ui/Dialog";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
@@ -17,8 +18,13 @@ import {
   DollarSign,
   Printer,
   ArrowLeft,
+  Undo2,
 } from "lucide-react";
 import { useCurrency } from "@/hooks/useCurrency";
+import { formatQty } from "@/lib/units";
+import { can } from "@/lib/permissions";
+import { useAuth } from "@/hooks/useAuth";
+import CreditNoteDialog from "@/components/invoices/CreditNoteDialog";
 
 interface Business {
   id: string;
@@ -27,6 +33,7 @@ interface Business {
   phone: string | null;
   address: string | null;
   country: string | null;
+  vatNumber?: string | null;
 }
 
 interface Invoice {
@@ -36,8 +43,21 @@ interface Invoice {
   subtotal: number;
   taxTotal: number;
   discountTotal: number;
+  taxRate?: number;
   total: number;
   amountPaid: number;
+  creditedAmount?: number;
+  creditNotes?: {
+    id: string;
+    number: string;
+    reason: string | null;
+    total: number;
+    taxTotal: number;
+    refundAmount: number;
+    refundAccountName: string | null;
+    createdAt: string;
+    lines: { id: string; description: string; quantity: number; total: number; restocked: boolean }[];
+  }[];
   notes: string | null;
   dueDate: string | null;
   createdAt: string;
@@ -59,7 +79,7 @@ interface Invoice {
     quantity: number;
     unitPrice: number;
     total: number;
-    product: { name: string; sku: string | null } | null;
+    product: { name: string; sku: string | null; unit?: string } | null;
   }[];
   payments: {
     id: string;
@@ -73,6 +93,7 @@ interface Invoice {
 export default function InvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { format } = useCurrency();
+  const { user } = useAuth();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [business, setBusiness] = useState<Business | null>(null);
   const [loading, setLoading] = useState(true);
@@ -109,7 +130,7 @@ export default function InvoiceDetailPage() {
         setInvoice(invRes.data);
         setBusiness(bizRes.data);
       })
-      .catch(console.error)
+      .catch((e: unknown) => reportError(e, "Could not load this page"))
       .finally(() => {
         if (active) setLoading(false);
       });
@@ -118,18 +139,44 @@ export default function InvoiceDetailPage() {
     };
   }, [id]);
 
-  const finalize = async () => {
-    if (
-      !confirm(
-        "Finalize this invoice? This will deduct stock and cannot be undone."
-      )
-    )
+  const [showFinalize, setShowFinalize] = useState(false);
+  const [showCredit, setShowCredit] = useState(false);
+  const [initialAmount, setInitialAmount] = useState(0);
+  const [initialMethod, setInitialMethod] = useState("cash");
+  const [initialAccountId, setInitialAccountId] = useState("");
+  const [initialReference, setInitialReference] = useState("");
+  const [finalizing, setFinalizing] = useState(false);
+  const [finalizeError, setFinalizeError] = useState("");
+
+  const finalize = () => {
+    setInitialAmount(0);
+    setInitialReference("");
+    setFinalizeError("");
+    setShowFinalize(true);
+  };
+
+  const confirmFinalize = async () => {
+    setFinalizeError("");
+    if (initialAmount > 0 && !initialAccountId) {
+      setFinalizeError("Choose the account the payment went into");
       return;
+    }
+    setFinalizing(true);
     try {
-      await apiFetch(`/invoices/${id}/finalize`, { method: "POST" });
+      await apiFetch(`/invoices/${id}/finalize`, {
+        method: "POST",
+        body: JSON.stringify(
+          initialAmount > 0
+            ? { payment: { amount: initialAmount, accountId: initialAccountId, method: initialMethod, reference: initialReference || undefined } }
+            : {}
+        ),
+      });
+      setShowFinalize(false);
       load();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Failed");
+      setFinalizeError(err instanceof Error ? err.message : "Could not finalize the invoice");
+    } finally {
+      setFinalizing(false);
     }
   };
 
@@ -202,7 +249,9 @@ export default function InvoiceDetailPage() {
     );
   }
 
-  const balance = invoice.total - invoice.amountPaid;
+  const credited = invoice.creditedAmount ?? 0;
+  const balance = Math.round((invoice.total - invoice.amountPaid - credited) * 100) / 100;
+  const canCredit = !!invoice.finalizedAt && invoice.status !== "cancelled" && invoice.status !== "draft" && can(user?.permissions, "sales", "write");
   const statusVariant =
     invoice.status === "paid"
       ? "success"
@@ -255,16 +304,23 @@ export default function InvoiceDetailPage() {
                   </Button>
                 </>
               )}
-              {invoice.status === "paid" && (
+              {canCredit && (
+                <Button variant="outline" onClick={() => setShowCredit(true)}>
+                  <Undo2 className="w-4 h-4 mr-1" /> Return / credit
+                </Button>
+              )}
+              {invoice.status === "paid" && credited === 0 && (
                 <Button variant="outline" onClick={cancel}>
                   <XCircle className="w-4 h-4 mr-1" /> Cancel
                 </Button>
               )}
               {["unpaid", "partially_paid", "overdue"].includes(invoice.status) && (
                 <>
-                  <Button variant="outline" onClick={cancel}>
-                    <XCircle className="w-4 h-4 mr-1" /> Cancel
-                  </Button>
+                  {credited === 0 && (
+                    <Button variant="outline" onClick={cancel}>
+                      <XCircle className="w-4 h-4 mr-1" /> Cancel
+                    </Button>
+                  )}
                   <Button
                     onClick={() => {
                       setPayAmount(balance);
@@ -294,6 +350,7 @@ export default function InvoiceDetailPage() {
               {businessCountry && <p>{businessCountry}</p>}
               {businessPhone && <p>{businessPhone}</p>}
               {businessEmail && <p>{businessEmail}</p>}
+              {business?.vatNumber && <p>VAT ID: {business.vatNumber}</p>}
             </div>
           </div>
 
@@ -369,7 +426,7 @@ export default function InvoiceDetailPage() {
                       </div>
                     )}
                   </td>
-                  <td className="px-5 py-4 text-right text-ink">{it.quantity}</td>
+                  <td className="px-5 py-4 text-right text-ink">{formatQty(it.quantity, it.product?.unit)}</td>
                   <td className="px-5 py-4 text-right text-ink">
                     {format(it.unitPrice)}
                   </td>
@@ -408,7 +465,7 @@ export default function InvoiceDetailPage() {
             )}
             {invoice.taxTotal > 0 && (
               <div className="flex justify-between">
-                <span className="text-ink-soft">Tax</span>
+                <span className="text-ink-soft">VAT{invoice.taxRate ? ` (${invoice.taxRate}%)` : ""}</span>
                 <span className="text-ink">{format(invoice.taxTotal)}</span>
               </div>
             )}
@@ -422,6 +479,12 @@ export default function InvoiceDetailPage() {
                 <span>− {format(invoice.amountPaid)}</span>
               </div>
             )}
+            {credited > 0 && (
+              <div className="flex justify-between text-ink-soft">
+                <span>Credited</span>
+                <span>− {format(credited)}</span>
+              </div>
+            )}
             {balance > 0 && (
               <div className="flex justify-between text-danger font-medium">
                 <span>Balance Due</span>
@@ -430,6 +493,31 @@ export default function InvoiceDetailPage() {
             )}
           </div>
         </div>
+
+        {(invoice.creditNotes?.length ?? 0) > 0 && (
+          <div className="mt-10 pt-6 border-t border-border-soft">
+            <p className="text-xs font-bold uppercase tracking-wider text-ink-soft mb-3">Credit notes</p>
+            <div className="space-y-3 text-sm">
+              {invoice.creditNotes!.map((cn) => (
+                <div key={cn.id} className="rounded-lg border border-border-soft p-3">
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <span className="font-semibold">{cn.number} <span className="font-normal text-ink-soft">· {new Date(cn.createdAt).toLocaleDateString()}{cn.reason ? ` · ${cn.reason}` : ""}</span></span>
+                    <span className="font-semibold tabular-nums">{format(cn.total)}</span>
+                  </div>
+                  <ul className="mt-1.5 text-ink-soft">
+                    {cn.lines.map((l) => (
+                      <li key={l.id} className="flex justify-between gap-2">
+                        <span>{formatQty(l.quantity)} × {l.description}{l.restocked ? " (back to stock)" : " (not restocked)"}</span>
+                        <span className="tabular-nums">{format(l.total)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {cn.refundAmount > 0 && <p className="mt-1.5 text-ink-soft">Refunded {format(cn.refundAmount)}{cn.refundAccountName ? ` from ${cn.refundAccountName}` : ""}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {invoice.payments.length > 0 && (
           <div className="mt-10 pt-6 border-t border-border-soft">
@@ -582,6 +670,79 @@ export default function InvoiceDetailPage() {
           </div>
         )}
         {cancelError && <p className="text-sm text-danger">{cancelError}</p>}
+      </Dialog>
+
+      <CreditNoteDialog
+        open={showCredit}
+        onClose={() => setShowCredit(false)}
+        onDone={() => { setShowCredit(false); load(); }}
+        invoiceId={invoice.id}
+        invoiceNumber={invoice.invoiceNumber}
+        balance={balance}
+      />
+
+      <Dialog
+        open={showFinalize}
+        onClose={() => setShowFinalize(false)}
+        title={`Finalize ${invoice.invoiceNumber}?`}
+        description="Stock is deducted at its batch cost and the sale is recorded in the accounts. This can't be undone, only cancelled."
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setShowFinalize(false)}>Back</Button>
+            <Button onClick={confirmFinalize} isLoading={finalizing}>
+              <CheckCircle2 className="w-4 h-4 mr-1" /> Finalize{initialAmount > 0 ? " & record payment" : ""}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex justify-between rounded-lg bg-ivory px-4 py-3 text-sm">
+          <span className="text-ink-soft">Invoice total</span>
+          <span className="font-semibold tabular-nums">{format(invoice.total)}</span>
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Paid now (optional)</label>
+          <NumericInput min={0} max={invoice.total} value={initialAmount} onChange={setInitialAmount} />
+          <div className="mt-1.5 flex gap-2 text-xs">
+            <button type="button" className="text-brand-dark hover:underline" onClick={() => setInitialAmount(invoice.total)}>Paid in full</button>
+            {initialAmount > 0 && initialAmount < invoice.total && (
+              <span className="text-ink-soft">· {format(invoice.total - initialAmount)} left to collect</span>
+            )}
+          </div>
+        </div>
+        {initialAmount > 0 && (
+          <>
+            <div>
+              <label className="block text-sm font-medium mb-1">Received into</label>
+              <PaymentAccountSelect value={initialAccountId} onChange={setInitialAccountId} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium mb-1">Method</label>
+                <select
+                  value={initialMethod}
+                  onChange={(e) => setInitialMethod(e.target.value)}
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
+                >
+                  <option value="cash">Cash</option>
+                  <option value="bank_transfer">Bank Transfer</option>
+                  <option value="mobile">Mobile Payment</option>
+                  <option value="card">Card</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Reference</label>
+                <input
+                  value={initialReference}
+                  onChange={(e) => setInitialReference(e.target.value)}
+                  placeholder="Optional"
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
+                />
+              </div>
+            </div>
+          </>
+        )}
+        {finalizeError && <p className="text-sm text-danger" role="alert">{finalizeError}</p>}
       </Dialog>
     </div>
   );

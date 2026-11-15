@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { reportError, confirmAction } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
@@ -41,7 +42,7 @@ export default function LocationsSettingsPage() {
     let active = true;
     apiFetch<{ success: boolean; data: Location[] }>("/locations")
       .then((res) => { if (active) setLocations(res.data); })
-      .catch(console.error)
+      .catch((e: unknown) => reportError(e, "Could not load this page"))
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, []);
@@ -99,7 +100,7 @@ export default function LocationsSettingsPage() {
 
   const toggleStatus = async (loc: Location) => {
     const newStatus = loc.status === "active" ? "inactive" : "active";
-    if (newStatus === "inactive" && !confirm(`Deactivate "${loc.name}"?`)) return;
+    if (newStatus === "inactive" && !(await confirmAction({ title: `Deactivate "${loc.name}"?`, danger: true, confirmLabel: "Deactivate" }))) return;
     try {
       await apiFetch(`/locations/${loc.id}`, {
         method: "PUT",
@@ -107,26 +108,26 @@ export default function LocationsSettingsPage() {
       });
       await Promise.all([load(), refreshSharedLocations()]);
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Failed");
+      reportError(err instanceof Error ? err.message : "Failed");
     }
   };
 
   const handleDelete = async (loc: Location) => {
-    if (!confirm(`Delete "${loc.name}" permanently?`)) return;
+    if (!(await confirmAction({ title: `Delete "${loc.name}" permanently?`, danger: true }))) return;
     try {
       await apiFetch(`/locations/${loc.id}`, { method: "DELETE" });
       await Promise.all([load(), refreshSharedLocations()]);
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Failed to delete");
+      reportError(err instanceof Error ? err.message : "Failed to delete");
     }
   };
 
   const setAsDefault = async (loc: Location) => {
-    if (!confirm(`Make "${loc.name}" the default branch?`)) return;
+    if (!(await confirmAction({ title: `Make "${loc.name}" the default branch?`, confirmLabel: "Make default" }))) return;
     try {
       await apiFetch(`/locations/${loc.id}/set-default`, { method: "POST" });
       await Promise.all([load(), refreshSharedLocations()]);
-    } catch (err) { console.error(err); }
+    } catch (err) { reportError(err); }
   };
 
   return (

@@ -8,7 +8,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "stock:check": "ts-node --transpile-only src/scripts/stock-check.ts"
+    "stock:check": "ts-node --transpile-only src/scripts/stock-check.ts",
+    "test": "node tests/run.mjs"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

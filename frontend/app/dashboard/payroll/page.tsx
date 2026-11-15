@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { reportError, confirmAction } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
@@ -46,7 +47,7 @@ export default function PayrollPage() {
       .then((res) => {
         if (active) setPayrolls(res.data);
       })
-      .catch(console.error)
+      .catch((e: unknown) => reportError(e, "Could not load this page"))
       .finally(() => {
         if (active) setLoading(false);
       });
@@ -102,12 +103,12 @@ export default function PayrollPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this payroll entry?")) return;
+    if (!(await confirmAction({ title: "Delete this payroll entry?", danger: true }))) return;
     try {
       await apiFetch(`/payroll/${id}`, { method: "DELETE" });
       load();
     } catch (err) {
-      console.error(err);
+      reportError(err);
     }
   };
 

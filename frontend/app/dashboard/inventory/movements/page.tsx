@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import Skeleton from "@/components/ui/Skeleton";
@@ -23,6 +24,11 @@ const typeConfig: Record<string, { label: string; variant: "success" | "danger" 
   supplier_return: { label: "Supplier Return", variant: "warning" },
   adjustment: { label: "Adjustment", variant: "warning" },
   count: { label: "Stock count", variant: "warning" },
+  production_issue: { label: "Used in production", variant: "info" },
+  production_return: { label: "Returned from production", variant: "success" },
+  production_output: { label: "Produced", variant: "success" },
+  transfer_in: { label: "Transferred in", variant: "info" },
+  transfer_out: { label: "Transferred out", variant: "default" },
   damage: { label: "Damage", variant: "danger" },
   transfer: { label: "Transfer", variant: "default" },
 };
@@ -36,7 +42,7 @@ export default function StockMovementsPage() {
     let active = true;
     apiFetch<{ success: boolean; data: StockMovement[] }>("/stock")
       .then((res) => { if (active) setMovements(res.data); })
-      .catch(console.error)
+      .catch((e: unknown) => reportError(e, "Could not load this page"))
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [version]);

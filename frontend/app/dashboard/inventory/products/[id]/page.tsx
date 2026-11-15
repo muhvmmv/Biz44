@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import Skeleton from "@/components/ui/Skeleton";
@@ -14,11 +16,13 @@ import { useLocationVersion } from "@/hooks/useLocationRefetch";
 import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
 import NumericInput from "@/components/ui/NumericInput";
+import { formatQty, itemTypeLabel } from "@/lib/units";
 
 interface Product {
   id: string; name: string; sku: string | null; description: string | null;
   price: number; cost: number; totalCostValue: number;
   quantity: number; reorderPoint: number;
+  unit: string; itemType: string;
 }
 
 interface Batch {
@@ -32,6 +36,7 @@ interface Batch {
   isLegacy: boolean;
   supplier: { name: string } | null;
   location: { name: string } | null;
+  productionOrder: { id: string; number: string } | null;
 }
 
 interface Level {
@@ -86,7 +91,7 @@ export default function ProductDetailPage() {
     let active = true;
     fetchAll()
       .then((r) => { if (active) apply(r); })
-      .catch(console.error)
+      .catch((e: unknown) => reportError(e, "Could not load this page"))
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [fetchAll, apply, version]);
@@ -161,7 +166,8 @@ export default function ProductDetailPage() {
           <p className="text-sm text-ink-soft">
             Stock{activeLocation ? ` · ${activeLocation.name}` : locations.length > 1 ? " · all locations" : ""}
           </p>
-          <p className="text-2xl font-bold mt-1 text-ink">{product.quantity}</p>
+          <p className="text-2xl font-bold mt-1 text-ink">{formatQty(product.quantity, product.unit)}</p>
+          <p className="text-xs text-ink-soft mt-0.5">{itemTypeLabel(product.itemType)}</p>
         </CardContent></Card>
         <Card><CardContent className="p-5">
           <p className="text-sm text-ink-soft">Inventory value (cost)</p>
@@ -203,7 +209,7 @@ export default function ProductDetailPage() {
                 <p className="text-sm text-ink-soft flex items-center gap-1.5">
                   <MapPin size={14} className="text-brand" /> {l.name}
                 </p>
-                <p className="text-xl font-bold text-ink mt-1 tabular-nums">{l.quantity}</p>
+                <p className="text-xl font-bold text-ink mt-1 tabular-nums">{formatQty(l.quantity, product.unit)}</p>
                 <p className="text-xs text-ink-soft">{format(l.value)} at cost</p>
               </div>
             ))}
@@ -243,13 +249,19 @@ export default function ProductDetailPage() {
                           <Badge variant="default" className="ml-2">opening</Badge>
                         )}
                       </td>
-                      <td className="px-6 py-3 text-ink">{b.reference || "—"}</td>
+                      <td className="px-6 py-3 text-ink">
+                        {b.productionOrder ? (
+                          <Link href={`/dashboard/production/${b.productionOrder.id}`} className="font-medium text-brand-dark hover:underline">
+                            {b.productionOrder.number}
+                          </Link>
+                        ) : (b.reference || "—")}
+                      </td>
                       <td className="px-6 py-3 text-ink-soft">{b.supplier?.name || "—"}</td>
                       {locations.length > 1 && (
                         <td className="px-6 py-3 text-ink-soft">{b.location?.name || "—"}</td>
                       )}
-                      <td className="px-6 py-3 text-right text-ink-soft">{b.quantityReceived}</td>
-                      <td className="px-6 py-3 text-right font-medium text-ink">{b.quantityRemaining}</td>
+                      <td className="px-6 py-3 text-right text-ink-soft">{formatQty(b.quantityReceived, product.unit)}</td>
+                      <td className="px-6 py-3 text-right font-medium text-ink">{formatQty(b.quantityRemaining, product.unit)}</td>
                       <td className="px-6 py-3 text-right text-ink">{format(b.unitCost)}</td>
                       <td className="px-6 py-3 text-right font-medium text-ink">
                         {format(b.quantityRemaining * b.unitCost)}
@@ -284,19 +296,19 @@ export default function ProductDetailPage() {
         {dialog === "count" ? (
           <div>
             <label className="block text-sm font-medium mb-1">Counted quantity</label>
-            <NumericInput allowDecimals={false} min={0} value={counted} onChange={setCounted} />
+            <NumericInput min={0} value={counted} onChange={setCounted} />
             <p className="text-xs text-ink-soft mt-1">
-              System shows {product.quantity}.{" "}
+              System shows {formatQty(product.quantity, product.unit)}.{" "}
               {counted !== product.quantity &&
-                `Difference: ${counted - product.quantity > 0 ? "+" : ""}${counted - product.quantity}`}
+                `Difference: ${counted - product.quantity > 0 ? "+" : ""}${formatQty(counted - product.quantity, product.unit)}`}
             </p>
           </div>
         ) : (
           <>
             <div>
               <label className="block text-sm font-medium mb-1">Units to write off</label>
-              <NumericInput allowDecimals={false} min={0} max={product.quantity} value={writeOffQty} onChange={setWriteOffQty} />
-              <p className="text-xs text-ink-soft mt-1">{product.quantity} in stock here.</p>
+              <NumericInput min={0} max={product.quantity} value={writeOffQty} onChange={setWriteOffQty} />
+              <p className="text-xs text-ink-soft mt-1">{formatQty(product.quantity, product.unit)} in stock here.</p>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Reason</label>

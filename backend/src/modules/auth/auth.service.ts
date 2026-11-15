@@ -4,6 +4,8 @@ import { env } from '../../config/env';
 import { DEFAULT_ACCOUNT_KEYS, SYSTEM_ACCOUNTS } from '../../lib/ledger';
 
 import { prisma } from '../../lib/prisma';
+import { badRequest } from '../../lib/errors';
+import { permissionsFor } from '../../lib/permissions';
 
 export interface RegisterInput {
   firstName: string;
@@ -85,14 +87,16 @@ export class AuthService {
   }
 
   async login(data: LoginInput) {
-    const user = await prisma.user.findUnique({
-      where: { email: data.email },
+    const email = typeof data.email === 'string' ? data.email.trim() : '';
+    const user = await prisma.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
       include: { company: true },
     });
     if (!user) throw new Error('Invalid email or password');
 
     const valid = await bcrypt.compare(data.password, user.password);
     if (!valid) throw new Error('Invalid email or password');
+    if (!user.isActive) throw new Error('This account has been deactivated. Ask your administrator.');
 
     // Safety net: if the user somehow has no location access yet, grant them
     // access to the company's default location.
@@ -131,6 +135,32 @@ export class AuthService {
     return this.sanitizeUser(user);
   }
 
+  async updateProfile(userId: string, data: { firstName?: unknown; lastName?: unknown }) {
+    const clean = (v: unknown, label: string) => {
+      if (v === undefined) return undefined;
+      const t = typeof v === 'string' ? v.trim() : '';
+      if (!t) throw badRequest(`${label} is required`);
+      if (t.length > 80) throw badRequest(`${label} is too long`);
+      return t;
+    };
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { firstName: clean(data.firstName, 'First name'), lastName: clean(data.lastName, 'Last name') },
+      include: { company: true },
+    });
+    return this.sanitizeUser(user);
+  }
+
+  async changePassword(userId: string, currentPassword: unknown, newPassword: unknown) {
+    if (typeof currentPassword !== 'string' || !currentPassword) throw badRequest('Enter your current password');
+    if (typeof newPassword !== 'string' || newPassword.length < 8) throw badRequest('The new password must be at least 8 characters');
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw badRequest('User not found');
+    if (!(await bcrypt.compare(currentPassword, user.password))) throw badRequest('Your current password is not correct');
+    if (await bcrypt.compare(newPassword, user.password)) throw badRequest('Choose a password different from the current one');
+    await prisma.user.update({ where: { id: userId }, data: { password: await bcrypt.hash(newPassword, 12) } });
+  }
+
   private generateToken(user: { id: string; email: string; role: string; companyId: string }) {
     return jwt.sign(
       { id: user.id, email: user.email, role: user.role, companyId: user.companyId },
@@ -149,6 +179,7 @@ export class AuthService {
       companyId: user.companyId,
       businessType: user.company?.businessType ?? null,
       currency: user.company?.currency ?? 'USD',
+      permissions: permissionsFor(user.role),
     };
   }
 }

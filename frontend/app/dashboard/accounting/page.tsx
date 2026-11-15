@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Wallet, Landmark, ArrowDownLeft, ArrowUpRight, ChevronRight } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
 import Skeleton from "@/components/ui/Skeleton";
 import StatCard from "@/components/ui/StatCard";
@@ -46,7 +47,7 @@ export default function AccountingOverviewPage() {
     let active = true;
     apiFetch<{ success: boolean; data: Overview }>("/accounting/overview")
       .then((r) => { if (active) setData(r.data); })
-      .catch(console.error);
+      .catch((e: unknown) => reportError(e, "Could not load this page"));
     return () => { active = false; };
   }, [version]);
 

@@ -10,6 +10,7 @@ import NumericInput from "@/components/ui/NumericInput";
 import { Plus, Trash2, AlertTriangle } from "lucide-react";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useLocationVersion } from "@/hooks/useLocationRefetch";
+import { formatQty } from "@/lib/units";
 
 interface Customer {
   id: string;
@@ -23,6 +24,8 @@ interface Product {
   price: number;
   quantity: number;
   reorderPoint: number;
+  unit: string;
+  itemType: string;
 }
 interface LineItem {
   productId: string;
@@ -47,6 +50,9 @@ export default function NewInvoicePage() {
   const [items, setItems] = useState<LineItem[]>([
     { productId: "", description: "", quantity: 1, unitPrice: 0 },
   ]);
+  const [discountType, setDiscountType] = useState<"amount" | "percent">("amount");
+  const [discountValue, setDiscountValue] = useState(0);
+  const [taxRate, setTaxRate] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -58,6 +64,12 @@ export default function NewInvoicePage() {
       setCustomers(c.data);
       setProducts(p.data);
     });
+  }, [version]);
+
+  useEffect(() => {
+    apiFetch<{ success: boolean; data: { vatRate: number } }>("/settings/company")
+      .then((r) => setTaxRate(r.data.vatRate ?? 0))
+      .catch(() => {});
   }, [version]);
 
   const updateItem = (idx: number, updates: Partial<LineItem>) =>
@@ -84,7 +96,9 @@ export default function NewInvoicePage() {
   };
 
   const subtotal = items.reduce((s, it) => s + it.quantity * it.unitPrice, 0);
-  const total = subtotal;
+  const discount = Math.round((discountType === "percent" ? (subtotal * (discountValue || 0)) / 100 : discountValue || 0) * 100) / 100;
+  const tax = Math.round(((subtotal - discount) * (taxRate || 0)) / 100 * 100) / 100;
+  const total = subtotal - discount + tax;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,7 +113,11 @@ export default function NewInvoicePage() {
       return;
     }
     if (items.some((it) => it.quantity <= 0 || it.unitPrice < 0)) {
-      setError("Check quantities and prices — quantities must be at least 1");
+      setError("Check quantities and prices — quantities must be more than zero");
+      return;
+    }
+    if (discount < 0 || discount > subtotal + 0.001 || (discountType === "percent" && discountValue > 100)) {
+      setError("The discount cannot be more than the subtotal");
       return;
     }
 
@@ -109,7 +127,7 @@ export default function NewInvoicePage() {
       const product = products.find((p) => p.id === it.productId);
       if (product && it.quantity > product.quantity) {
         setError(
-          `Not enough stock for ${product.name}. Available: ${product.quantity}, requested: ${it.quantity}`
+          `Not enough stock for ${product.name}. Available: ${formatQty(product.quantity, product.unit)}, requested: ${formatQty(it.quantity, product.unit)}`
         );
         return;
       }
@@ -127,6 +145,9 @@ export default function NewInvoicePage() {
           customerAddress: customerMode === "new" ? adhoc.address : null,
           dueDate: dueDate || undefined,
           notes: notes || undefined,
+          discountType,
+          discountValue: discountValue || 0,
+          taxRate: taxRate || 0,
           items: items.map((it) => ({
             productId: it.productId || null,
             description: it.description,
@@ -284,7 +305,7 @@ export default function NewInvoicePage() {
                         <option value="">Custom item</option>
                         {products.map((p) => (
                           <option key={p.id} value={p.id}>
-                            {p.name} — stock: {p.quantity}
+                            {p.name} — stock: {formatQty(p.quantity, p.unit)}
                           </option>
                         ))}
                       </select>
@@ -299,7 +320,7 @@ export default function NewInvoicePage() {
                           }`}
                         >
                           {lowStock && !notEnoughStock && <AlertTriangle size={12} />}
-                          Available: {product.quantity}
+                          Available: {formatQty(product.quantity, product.unit)}
                           {lowStock && !notEnoughStock && " (Low stock)"}
                           {notEnoughStock && " — not enough"}
                         </p>
@@ -319,11 +340,10 @@ export default function NewInvoicePage() {
                     </div>
                     <div className="col-span-1">
                       <label className="block text-xs font-medium text-ink-soft mb-1">
-                        Qty
+                        Qty{product ? ` (${product.unit})` : ""}
                       </label>
                       <NumericInput
-                        allowDecimals={false}
-                        min={1}
+                        min={0}
                         value={item.quantity}
                         onChange={(v) => updateItem(idx, { quantity: v })}
                       />
@@ -358,11 +378,59 @@ export default function NewInvoicePage() {
             </div>
 
             <div className="flex justify-end pt-6 border-t border-border-soft mt-4">
-              <div className="text-right space-y-1">
-                <p className="text-sm text-ink-soft">
-                  Subtotal: <span className="font-medium text-ink">{format(subtotal)}</span>
-                </p>
-                <p className="text-xl font-bold text-ink">Total: {format(total)}</p>
+              <div className="w-full max-w-sm space-y-2 text-sm">
+                <div className="flex justify-between text-ink-soft">
+                  <span>Subtotal</span>
+                  <span className="font-medium text-ink tabular-nums">{format(subtotal)}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-ink-soft">Discount</span>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={discountType}
+                      onChange={(e) => setDiscountType(e.target.value as "amount" | "percent")}
+                      aria-label="Discount type"
+                      className="rounded-lg border border-border-soft bg-white px-2 py-1.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
+                    >
+                      <option value="amount">Amount</option>
+                      <option value="percent">%</option>
+                    </select>
+                    <NumericInput
+                      min={0}
+                      value={discountValue}
+                      onChange={setDiscountValue}
+                      className="w-28 text-right"
+                      aria-label="Discount value"
+                    />
+                  </div>
+                </div>
+                {discount > 0 && (
+                  <div className="flex justify-between text-ink-soft">
+                    <span>Less discount</span>
+                    <span className="tabular-nums">− {format(discount)}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-ink-soft">VAT %</span>
+                  <NumericInput
+                    min={0}
+                    max={100}
+                    value={taxRate}
+                    onChange={setTaxRate}
+                    className="w-28 text-right"
+                    aria-label="VAT rate"
+                  />
+                </div>
+                {tax > 0 && (
+                  <div className="flex justify-between text-ink-soft">
+                    <span>VAT</span>
+                    <span className="tabular-nums">{format(tax)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between border-t border-border-soft pt-2 text-lg font-bold text-ink">
+                  <span>Total</span>
+                  <span className="tabular-nums">{format(total)}</span>
+                </div>
               </div>
             </div>
           </CardContent>

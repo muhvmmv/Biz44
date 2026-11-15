@@ -42,6 +42,9 @@ interface Report {
     batchValueTotal: number;
     inventoryAccountBalance: number;
     inventoryAccountDifference: number;
+    wipAccountBalance?: number;
+    wipOrdersValue?: number;
+    wipDifference?: number;
   };
   issues: Issue[];
 }
@@ -196,6 +199,12 @@ export default function StockCheckPage() {
                   Inventory account: {format(report.summary.inventoryAccountBalance)}
                 </p>
               )}
+              {Math.abs(report.summary.wipDifference ?? 0) > 0.01 && (
+                <p className="text-xs text-warning mt-1">
+                  Work in progress account {format(report.summary.wipAccountBalance ?? 0)} vs running orders{" "}
+                  {format(report.summary.wipOrdersValue ?? 0)}
+                </p>
+              )}
             </CardContent></Card>
           </div>
 
@@ -303,7 +312,7 @@ export default function StockCheckPage() {
         )}
         <div>
           <label className="block text-sm font-medium mb-1">Counted quantity at {countLocationName}</label>
-          <NumericInput allowDecimals={false} min={0} value={counted} onChange={setCounted} />
+          <NumericInput min={0} value={counted} onChange={setCounted} />
         </div>
         {countError && <p className="text-sm text-danger">{countError}</p>}
       </Dialog>

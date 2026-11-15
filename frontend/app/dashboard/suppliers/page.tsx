@@ -1,163 +1,195 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Plus, Pencil, Trash2, Truck } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
-import Skeleton from "@/components/ui/Skeleton";
-import { Card, CardContent } from "@/components/ui/Card";
-import { Plus, Pencil, Trash2, Truck } from "lucide-react";
+import Dialog from "@/components/ui/Dialog";
+import DataTable, { Column } from "@/components/ui/DataTable";
+import StatCard from "@/components/ui/StatCard";
+import { Field, Input } from "@/components/ui/Input";
+import { useAuth } from "@/hooks/useAuth";
+import { useCurrency } from "@/hooks/useCurrency";
+import { useOpenOnQuery } from "@/hooks/useOpenOnQuery";
+import { can } from "@/lib/permissions";
 
 interface Supplier {
-  id: string; name: string; email: string; phone: string; address: string;
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  owed: number;
+  overdue: number;
 }
 
-export default function SuppliersPage() {
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [editing, setEditing] = useState<Supplier | null>(null);
-  const [search, setSearch] = useState("");
-  const [form, setForm] = useState({ name: "", email: "", phone: "", address: "" });
+const EMPTY = { name: "", email: "", phone: "", address: "" };
 
-  const reload = () => {
-    apiFetch<{ success: boolean; data: Supplier[] }>("/suppliers")
-      .then((res) => setSuppliers(res.data))
-      .finally(() => setLoading(false));
-  };
+export default function SuppliersPage() {
+  const router = useRouter();
+  const { user } = useAuth();
+  const { format } = useCurrency();
+  const canEdit = can(user?.permissions, "purchasing", "write");
+  const [suppliers, setSuppliers] = useState<Supplier[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Supplier | null>(null);
+  const [form, setForm] = useState(EMPTY);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  const [deleting, setDeleting] = useState<Supplier | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   useEffect(() => {
     let active = true;
     apiFetch<{ success: boolean; data: Supplier[] }>("/suppliers")
-      .then((res) => { if (active) setSuppliers(res.data); })
-      .catch(console.error)
-      .finally(() => { if (active) setLoading(false); });
+      .then((r) => { if (active) { setSuppliers(r.data); setLoadError(null); } })
+      .catch((e: unknown) => { if (active) setLoadError(e instanceof Error ? e.message : "Something went wrong"); });
     return () => { active = false; };
-  }, []);
+  }, [reloadKey]);
+  const reload = () => setReloadKey((k) => k + 1);
 
-  const openNew = () => { setEditing(null); setForm({ name: "", email: "", phone: "", address: "" }); setShowForm(true); };
+  const openNew = useCallback(() => {
+    setEditing(null);
+    setForm(EMPTY);
+    setFormError("");
+    setFormOpen(true);
+  }, []);
+  useOpenOnQuery("new", openNew);
+
   const openEdit = (s: Supplier) => {
     setEditing(s);
-    setForm({ name: s.name, email: s.email || "", phone: s.phone || "", address: s.address || "" });
-    setShowForm(true);
+    setForm({ name: s.name, email: s.email ?? "", phone: s.phone ?? "", address: s.address ?? "" });
+    setFormError("");
+    setFormOpen(true);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const save = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError("");
+    if (!form.name.trim()) return setFormError("Enter the supplier's name");
+    setSaving(true);
     try {
-      if (editing) await apiFetch(`/suppliers/${editing.id}`, { method: "PUT", body: JSON.stringify(form) });
-      else await apiFetch("/suppliers", { method: "POST", body: JSON.stringify(form) });
-      setShowForm(false); reload();
-    } catch (err) { console.error(err); }
+      await apiFetch(editing ? `/suppliers/${editing.id}` : "/suppliers", { method: editing ? "PUT" : "POST", body: JSON.stringify(form) });
+      setFormOpen(false);
+      reload();
+    } catch (err: unknown) {
+      setFormError(err instanceof Error ? err.message : "Could not save the supplier");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Delete this supplier?")) return;
-    try { await apiFetch(`/suppliers/${id}`, { method: "DELETE" }); reload(); }
-    catch (err) { console.error(err); }
+  const remove = async () => {
+    if (!deleting) return;
+    setDeleteError("");
+    setDeleteBusy(true);
+    try {
+      await apiFetch(`/suppliers/${deleting.id}`, { method: "DELETE" });
+      setDeleting(null);
+      reload();
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : "Could not delete the supplier");
+    } finally {
+      setDeleteBusy(false);
+    }
   };
 
-  const filtered = suppliers.filter((s) => {
-    const q = search.toLowerCase();
-    return s.name.toLowerCase().includes(q) || (s.email || "").toLowerCase().includes(q);
-  });
+  const totalOwed = (suppliers ?? []).reduce((s, x) => s + x.owed, 0);
+  const totalOverdue = (suppliers ?? []).reduce((s, x) => s + x.overdue, 0);
+
+  const columns: Column<Supplier>[] = [
+    { key: "name", header: "Supplier", sortValue: (s) => s.name, cell: (s) => <span className="font-medium">{s.name}</span> },
+    { key: "phone", header: "Phone", hideBelow: "sm", cell: (s) => <span className="text-ink-soft">{s.phone || "—"}</span> },
+    { key: "email", header: "Email", hideBelow: "md", cell: (s) => <span className="text-ink-soft">{s.email || "—"}</span> },
+    {
+      key: "owed", header: "You owe", align: "right", sortValue: (s) => s.owed,
+      cell: (s) => (s.owed > 0 ? (
+        <span>
+          {format(s.owed)}
+          {s.overdue > 0 && <span className="block text-xs text-danger">{format(s.overdue)} overdue</span>}
+        </span>
+      ) : <span className="text-ink-faint">—</span>),
+    },
+  ];
+  if (canEdit) {
+    columns.push({
+      key: "actions", header: "", align: "right",
+      cell: (s) => (
+        <span className="inline-flex gap-1">
+          <Button variant="ghost" size="icon-sm" onClick={(e) => { e.stopPropagation(); openEdit(s); }} aria-label={`Edit ${s.name}`}><Pencil size={15} /></Button>
+          <Button variant="ghost" size="icon-sm" onClick={(e) => { e.stopPropagation(); setDeleteError(""); setDeleting(s); }} aria-label={`Delete ${s.name}`} className="hover:text-danger"><Trash2 size={15} /></Button>
+        </span>
+      ),
+    });
+  }
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Suppliers"
-        description="Manage your supplier relationships."
-        actions={<Button onClick={openNew}><Plus className="w-4 h-4 mr-1" /> Add Supplier</Button>}
+        description="Who you buy from, and what you owe each of them."
+        actions={canEdit ? <Button onClick={openNew}><Plus size={16} /> Add supplier</Button> : undefined}
       />
 
-      <input type="text" placeholder="Search by name or email..."
-        value={search} onChange={(e) => setSearch(e.target.value)}
-        className="w-full sm:w-80 rounded-lg border border-border-soft bg-white px-4 py-2.5 text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:ring-2 focus:ring-brand" />
-
-      <Card>
-        <CardContent className="p-0">
-          {loading ? (
-            <div className="p-6 space-y-3">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12" />)}</div>
-          ) : filtered.length === 0 ? (
-            <div className="py-16 text-center text-ink-soft">
-              <Truck className="w-12 h-12 mx-auto mb-3 opacity-40" />
-              <p>No suppliers yet.</p>
-              <Button onClick={openNew} className="mt-4">Add your first supplier</Button>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-ivory text-ink-soft text-left">
-                  <tr>
-                    <th className="px-6 py-3 font-medium">Name</th>
-                    <th className="px-6 py-3 font-medium">Email</th>
-                    <th className="px-6 py-3 font-medium">Phone</th>
-                    <th className="px-6 py-3 font-medium">Address</th>
-                    <th className="px-6 py-3 font-medium w-24">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border-soft">
-                  {filtered.map((s) => (
-                    <tr key={s.id} className="hover:bg-ivory">
-                      <td className="px-6 py-4">
-                        <Link href={`/dashboard/suppliers/${s.id}`} className="font-medium text-brand-dark hover:underline">
-                          {s.name}
-                        </Link>
-                      </td>
-                      <td className="px-6 py-4 text-ink-soft">{s.email || "—"}</td>
-                      <td className="px-6 py-4 text-ink-soft">{s.phone || "—"}</td>
-                      <td className="px-6 py-4 text-ink-soft">{s.address || "—"}</td>
-                      <td className="px-6 py-4">
-                        <div className="flex gap-2">
-                          <button onClick={() => openEdit(s)} className="p-1 text-ink-soft hover:text-brand-dark transition"><Pencil size={16} /></button>
-                          <button onClick={() => handleDelete(s.id)} className="p-1 text-ink-soft hover:text-danger transition"><Trash2 size={16} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg border border-border-soft">
-            <div className="p-6 border-b border-border-soft">
-              <h2 className="text-lg font-bold text-charcoal">{editing ? "Edit Supplier" : "New Supplier"}</h2>
-            </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1 text-charcoal">Name</label>
-                <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1 text-charcoal">Email</label>
-                <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1 text-charcoal">Phone</label>
-                <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1 text-charcoal">Address</label>
-                <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })}
-                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand" />
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <Button type="button" variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
-                <Button type="submit">{editing ? "Update" : "Create"}</Button>
-              </div>
-            </form>
-          </div>
+      {suppliers && suppliers.length > 0 && (
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+          <StatCard label="Suppliers" value={suppliers.length} />
+          <StatCard label="You owe" value={format(totalOwed)} />
+          <StatCard label="Overdue" value={format(totalOverdue)} tone={totalOverdue > 0 ? "negative" : "default"} />
         </div>
       )}
+
+      <DataTable
+        rows={suppliers}
+        columns={columns}
+        rowKey={(s) => s.id}
+        searchText={(s) => `${s.name} ${s.email ?? ""} ${s.phone ?? ""}`}
+        searchPlaceholder="Search name, phone or email"
+        error={loadError}
+        onRetry={reload}
+        onRowClick={(s) => router.push(`/dashboard/suppliers/${s.id}`)}
+        rowLabel={(s) => `Open ${s.name}`}
+        empty={{
+          icon: <Truck size={22} />,
+          title: "No suppliers yet",
+          description: "Add the people and companies you buy raw materials and packaging from.",
+          action: canEdit ? <Button onClick={openNew}><Plus size={16} /> Add supplier</Button> : undefined,
+        }}
+      />
+
+      <Dialog
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        title={editing ? "Edit supplier" : "Add supplier"}
+        footer={<><Button variant="outline" onClick={() => setFormOpen(false)}>Cancel</Button><Button type="submit" form="supplier-form" isLoading={saving}>{editing ? "Save" : "Add supplier"}</Button></>}
+      >
+        <form id="supplier-form" onSubmit={save} className="space-y-4">
+          <Field label="Name" required><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus /></Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Phone"><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} inputMode="tel" /></Field>
+            <Field label="Email"><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
+          </div>
+          <Field label="Address"><Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
+          {formError && <p className="text-sm text-danger" role="alert">{formError}</p>}
+        </form>
+      </Dialog>
+
+      <Dialog
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        title={`Delete ${deleting?.name ?? "supplier"}?`}
+        description="Suppliers with deliveries on record cannot be deleted; their history is kept."
+        footer={<><Button variant="outline" onClick={() => setDeleting(null)}>Keep</Button><Button variant="danger" onClick={remove} isLoading={deleteBusy}>Delete</Button></>}
+      >
+        {deleteError ? <p className="text-sm text-danger" role="alert">{deleteError}</p> : <p className="text-sm text-ink-soft">This can&apos;t be undone.</p>}
+      </Dialog>
     </div>
   );
 }

@@ -30,9 +30,14 @@ export function isDebitNormal(type: string) {
 export const SYSTEM_ACCOUNTS = {
   cash: { name: 'Cash', type: 'asset', code: '1000', subtype: 'cash' },
   ar: { name: 'Accounts Receivable', type: 'asset', code: '1100' },
-  inventory: { name: 'Inventory', type: 'asset', code: '1200' },
+  /** Finished goods (and anything bought to resell). */
+  inventory: { name: 'Finished Goods Inventory', type: 'asset', code: '1200' },
+  inventory_raw: { name: 'Raw Materials & Packaging', type: 'asset', code: '1210' },
+  inventory_wip: { name: 'Work in Progress', type: 'asset', code: '1220' },
+  vat_input: { name: 'VAT Recoverable', type: 'asset', code: '1300' },
   ap: { name: 'Accounts Payable', type: 'liability', code: '2000' },
   payroll_liabilities: { name: 'Payroll Deductions Payable', type: 'liability', code: '2100' },
+  vat_payable: { name: 'VAT Payable', type: 'liability', code: '2200' },
   opening_equity: { name: 'Opening Balance Equity', type: 'equity', code: '3000' },
   owner_capital: { name: "Owner's Capital", type: 'equity', code: '3100' },
   owner_drawings: { name: "Owner's Drawings", type: 'equity', code: '3200' },
@@ -50,7 +55,7 @@ export type SystemKey = keyof typeof SYSTEM_ACCOUNTS;
 
 /** Accounts every new company starts with. */
 export const DEFAULT_ACCOUNT_KEYS: SystemKey[] = [
-  'cash', 'ar', 'inventory', 'ap', 'payroll_liabilities', 'opening_equity', 'owner_capital', 'owner_drawings',
+  'cash', 'ar', 'inventory', 'inventory_raw', 'inventory_wip', 'ap', 'payroll_liabilities', 'opening_equity', 'owner_capital', 'owner_drawings',
   'sales', 'cogs', 'operating_expenses', 'rent', 'utilities', 'salaries',
   'inventory_loss', 'general_expense',
 ];

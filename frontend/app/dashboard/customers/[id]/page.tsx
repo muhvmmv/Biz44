@@ -4,12 +4,13 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
-import Button from "@/components/ui/Button";
+import { ButtonLink } from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import Skeleton from "@/components/ui/Skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Plus, DollarSign, TrendingUp, Receipt } from "lucide-react";
+import { Plus, DollarSign, TrendingUp, Receipt, FileText } from "lucide-react";
 import { useCurrency } from "@/hooks/useCurrency";
 
 interface Customer {
@@ -51,7 +52,7 @@ export default function CustomerDetailPage() {
     let active = true;
     apiFetch<{ success: boolean; data: Data }>(`/customers/${id}/summary`)
       .then((res) => { if (active) setData(res.data); })
-      .catch(console.error)
+      .catch((e: unknown) => reportError(e, "Could not load this page"))
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [id]);
@@ -67,9 +68,10 @@ export default function CustomerDetailPage() {
         title={`${customer.firstName} ${customer.lastName}`}
         description={`Customer since ${new Date(customer.createdAt).toLocaleDateString()}`}
         actions={
-          <Link href={`/dashboard/invoices/new?customerId=${customer.id}`}>
-            <Button><Plus className="w-4 h-4 mr-1" /> New Invoice</Button>
-          </Link>
+          <>
+            <ButtonLink href={`/dashboard/customers/${customer.id}/statement`} variant="outline"><FileText size={16} /> Statement</ButtonLink>
+            <ButtonLink href={`/dashboard/invoices/new?customerId=${customer.id}`}><Plus size={16} /> New Invoice</ButtonLink>
+          </>
         }
       />
 

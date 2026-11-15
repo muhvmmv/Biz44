@@ -7,8 +7,10 @@ import { badRequest, notFound } from '../../lib/errors';
 import {
   resolvePaymentAccount, parsePositiveAmount, parsePositiveQuantity,
 } from '../../lib/accounts';
-import { postJournal, systemAccount } from '../../lib/ledger';
-import { addStock, consumeFifo, restoreToBatch, syncProductTotals } from '../../lib/inventory';
+import { postJournal, systemAccount, round2 } from '../../lib/ledger';
+import { addStock, consumeFifo, restoreToBatch, syncProductTotals, inventoryAccountFor } from '../../lib/inventory';
+import { invoiceBalance } from '../../lib/invoiceBalance';
+import { createCreditNote, creditableLines } from './creditNotes';
 const router = Router();
 
 router.use(authenticate);
@@ -42,6 +44,77 @@ function isInvoiceNumberClash(err: any) {
 }
 
 const PAYABLE_STATUSES = ['unpaid', 'partially_paid', 'overdue'];
+
+/**
+ * Invoice totals. A discount is given either as an amount or a percentage of
+ * the subtotal (body.discountType = 'amount' | 'percent', body.discountValue).
+ * Revenue is recorded net of the discount. VAT (body.taxRate, percent, else the
+ * company's VAT rate) is charged on the discounted amount and owed to the tax
+ * authority, so it is never revenue.
+ */
+function invoiceTotals(items: { quantity: number; unitPrice: number }[], body: any, defaultTaxRate = 0) {
+  const subtotal = round2(items.reduce((s, it) => s + it.quantity * it.unitPrice, 0));
+  const value = body?.discountValue === undefined || body?.discountValue === '' || body?.discountValue === null ? 0 : Number(body.discountValue);
+  if (!Number.isFinite(value) || value < 0) throw badRequest('Discount must be 0 or more');
+  const type = body?.discountType === 'percent' ? 'percent' : 'amount';
+  if (type === 'percent' && value > 100) throw badRequest('Discount cannot be more than 100%');
+  const discountTotal = round2(type === 'percent' ? (subtotal * value) / 100 : value);
+  if (discountTotal > subtotal + 0.001) throw badRequest('Discount cannot be more than the invoice subtotal');
+  const rawRate = body?.taxRate === undefined || body?.taxRate === null || body?.taxRate === '' ? defaultTaxRate : Number(body.taxRate);
+  if (!Number.isFinite(rawRate) || rawRate < 0 || rawRate > 100) throw badRequest('VAT rate must be between 0 and 100');
+  const taxRate = round2(rawRate);
+  const net = round2(subtotal - discountTotal);
+  const taxTotal = round2((net * taxRate) / 100);
+  return { subtotal, discountTotal, taxRate, taxTotal, total: round2(net + taxTotal) };
+}
+
+async function companyVatRate(companyId: string) {
+  const c = await prisma.company.findUnique({ where: { id: companyId }, select: { vatRate: true } });
+  return c?.vatRate ?? 0;
+}
+
+/**
+ * Record a customer payment against an invoice inside a transaction:
+ * payment row, invoice paid amount and status, and Dr Cash-or-Bank / Cr Receivables.
+ */
+async function recordInvoicePayment(
+  tx: any,
+  args: { invoice: any; amount: number; account: any; method?: string; reference?: string | null; notes?: string | null; userId: string }
+) {
+  const { invoice, amount, account } = args;
+  const current = await tx.invoice.findUnique({ where: { id: invoice.id }, select: { amountPaid: true, total: true, creditedAmount: true } });
+  const newPaid = round2(current.amountPaid + amount);
+  const left = invoiceBalance({ ...current, amountPaid: newPaid });
+  if (left < -0.01) throw badRequest('Payment is more than the balance due');
+  const status = left <= 0.01 ? 'paid' : 'partially_paid';
+  await tx.payment.create({
+    data: {
+      companyId: invoice.companyId,
+      locationId: invoice.locationId,
+      invoiceId: invoice.id,
+      amount,
+      method: args.method || 'cash',
+      reference: args.reference || null,
+      notes: args.notes || null,
+    },
+  });
+  await tx.invoice.update({ where: { id: invoice.id }, data: { amountPaid: newPaid, status } });
+  const ar = await systemAccount(tx, invoice.companyId, 'ar');
+  await postJournal(tx, {
+    companyId: invoice.companyId,
+    locationId: invoice.locationId,
+    description: `Payment for ${invoice.invoiceNumber}`,
+    sourceType: 'invoice_payment',
+    sourceId: invoice.id,
+    reference: args.reference || invoice.invoiceNumber,
+    createdById: args.userId,
+    lines: [
+      { accountId: account.id, debit: amount },
+      { accountId: ar.id, credit: amount },
+    ],
+  });
+  return status;
+}
 
 interface CleanItem {
   productId: string | null;
@@ -105,8 +178,9 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       where: { id: req.params.id, companyId: req.user?.companyId },
       include: {
         customer: true,
-        items: { include: { product: { select: { name: true, sku: true } } } },
+        items: { include: { product: { select: { name: true, sku: true, unit: true } } } },
         payments: true,
+        creditNotes: { include: { lines: true }, orderBy: { createdAt: 'asc' } },
       },
     });
     if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
@@ -124,9 +198,7 @@ router.post('/', resolveLocation, async (req: Request, res: Response, next: Next
     } = req.body;
     const items = await validateInvoiceInput(companyId, req.body);
 
-    let subtotal = 0;
-    for (const it of items) subtotal += it.quantity * it.unitPrice;
-    const total = subtotal;
+    const { subtotal, discountTotal, taxRate, taxTotal, total } = invoiceTotals(items, req.body, await companyVatRate(companyId));
 
     const locationId = requireTargetLocation(req);
 
@@ -148,8 +220,9 @@ router.post('/', resolveLocation, async (req: Request, res: Response, next: Next
             invoiceNumber,
             status: 'draft',
             subtotal,
-            discountTotal: 0,
-            taxTotal: 0,
+            discountTotal,
+            taxRate,
+            taxTotal,
             total,
             notes,
             dueDate: dueDate ? new Date(dueDate) : null,
@@ -193,9 +266,8 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
     } = req.body;
     const items = await validateInvoiceInput(existing.companyId, req.body);
 
-    let subtotal = 0;
-    for (const it of items) subtotal += it.quantity * it.unitPrice;
-    const total = subtotal;
+    // A draft keeps its own rate unless a new one is sent.
+    const { subtotal, discountTotal, taxRate, taxTotal, total } = invoiceTotals(items, req.body, existing.taxRate);
 
     const updated = await prisma.$transaction(async (tx) => {
       await tx.invoiceItem.deleteMany({ where: { invoiceId: existing.id } });
@@ -210,6 +282,9 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
         dueDate: dueDate ? new Date(dueDate) : null,
         notes,
         subtotal,
+        discountTotal,
+        taxRate,
+        taxTotal,
         total,
         items: {
           create: items.map((it) => ({
@@ -245,6 +320,16 @@ router.post('/:id/finalize', async (req: Request, res: Response, next: NextFunct
       return res.status(400).json({ success: false, message: 'Only drafts can be finalized' });
     }
 
+    // Optional payment received at the same time (e.g. cash sale).
+    const initial = req.body?.payment;
+    let initialAmount = 0;
+    let initialAccount: any = null;
+    if (initial && initial.amount !== undefined && initial.amount !== '' && Number(initial.amount) > 0) {
+      initialAmount = parsePositiveAmount(initial.amount, 'Payment amount');
+      if (initialAmount > invoice.total + 0.01) throw badRequest('Payment is more than the invoice total');
+      initialAccount = await resolvePaymentAccount(prisma, companyId, { accountId: initial.accountId });
+    }
+
     await prisma.$transaction(async (tx) => {
       // Claim the draft first so a double click cannot finalize it twice.
       const claimed = await tx.invoice.updateMany({
@@ -254,6 +339,8 @@ router.post('/:id/finalize', async (req: Request, res: Response, next: NextFunct
       if (claimed.count === 0) throw badRequest('This invoice was already finalized');
 
       let totalCogs = 0;
+      // Cost leaves the inventory account of each item's stage.
+      const costByAccount = new Map<string, number>();
       const productIds: string[] = [];
       for (const item of invoice.items) {
         if (!item.productId) continue;
@@ -265,11 +352,14 @@ router.post('/:id/finalize', async (req: Request, res: Response, next: NextFunct
           locationId: invoice.locationId,
           productId: product.id,
           productName: product.name,
+          unit: product.unit,
           quantity: item.quantity,
           type: 'sale',
           reference: invoice.invoiceNumber,
         });
         totalCogs += totalCost;
+        const stock = await inventoryAccountFor(tx, companyId, product.itemType);
+        costByAccount.set(stock.id, (costByAccount.get(stock.id) ?? 0) + totalCost);
         productIds.push(product.id);
       }
       await syncProductTotals(tx, companyId, productIds);
@@ -278,7 +368,8 @@ router.post('/:id/finalize', async (req: Request, res: Response, next: NextFunct
       const ar = await systemAccount(tx, companyId, 'ar');
       const sales = await systemAccount(tx, companyId, 'sales');
       const cogs = await systemAccount(tx, companyId, 'cogs');
-      const inventory = await systemAccount(tx, companyId, 'inventory');
+      const taxTotal = round2(invoice.taxTotal ?? 0);
+      const vat = taxTotal > 0 ? await systemAccount(tx, companyId, 'vat_payable') : null;
       await postJournal(tx, {
         companyId,
         locationId: invoice.locationId,
@@ -289,11 +380,19 @@ router.post('/:id/finalize', async (req: Request, res: Response, next: NextFunct
         createdById: req.user!.id,
         lines: [
           { accountId: ar.id, debit: invoice.total },
-          { accountId: sales.id, credit: invoice.total },
+          { accountId: sales.id, credit: round2(invoice.total - taxTotal) },
+          ...(vat ? [{ accountId: vat.id, credit: taxTotal }] : []),
           { accountId: cogs.id, debit: totalCogs },
-          { accountId: inventory.id, credit: totalCogs },
+          ...Array.from(costByAccount, ([accountId, amount]) => ({ accountId, credit: amount })),
         ],
       });
+
+      if (initialAmount > 0 && initialAccount) {
+        await recordInvoicePayment(tx, {
+          invoice, amount: initialAmount, account: initialAccount, method: initial.method,
+          reference: initial.reference, userId: req.user!.id,
+        });
+      }
     });
 
     res.json({ success: true });
@@ -319,7 +418,7 @@ router.post('/:id/payment', async (req: Request, res: Response, next: NextFuncti
         `Payments cannot be recorded on a ${invoice.status} invoice`;
       throw badRequest(reason);
     }
-    const balance = invoice.total - invoice.amountPaid;
+    const balance = invoiceBalance(invoice);
     if (amount > balance + 0.01) {
       throw badRequest(`Amount is more than the balance due (${balance.toFixed(2)})`);
     }
@@ -330,45 +429,11 @@ router.post('/:id/payment', async (req: Request, res: Response, next: NextFuncti
       account: req.body?.account,
     });
 
-    const newPaid = invoice.amountPaid + amount;
-    let newStatus = invoice.status;
-    if (newPaid >= invoice.total - 0.01) newStatus = 'paid';
-    else if (newPaid > 0) newStatus = 'partially_paid';
-
-    await prisma.$transaction(async (tx) => {
-      await tx.payment.create({
-        data: {
-          companyId,
-          locationId: invoice.locationId,
-          invoiceId: invoice.id,
-          amount,
-          method,
-          reference,
-          notes,
-        },
-      });
-
-      await tx.invoice.update({
-        where: { id: invoice.id },
-        data: { amountPaid: newPaid, status: newStatus },
-      });
-
-      // Dr Cash-or-Bank / Cr Accounts Receivable
-      const ar = await systemAccount(tx, companyId, 'ar');
-      await postJournal(tx, {
-        companyId,
-        locationId: invoice.locationId,
-        description: `Payment for ${invoice.invoiceNumber}`,
-        sourceType: 'invoice_payment',
-        sourceId: invoice.id,
-        reference: reference || invoice.invoiceNumber,
-        createdById: req.user!.id,
-        lines: [
-          { accountId: receiveAccount.id, debit: amount },
-          { accountId: ar.id, credit: amount },
-        ],
-      });
-    });
+    await prisma.$transaction((tx) =>
+      recordInvoicePayment(tx, {
+        invoice, amount, account: receiveAccount, method, reference, notes, userId: req.user!.id,
+      })
+    );
 
     res.json({ success: true });
   } catch (err) { next(err); }
@@ -392,6 +457,9 @@ router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunctio
     if (!invoice) return res.status(404).json({ success: false, message: 'Not found' });
     if (invoice.status === 'cancelled') {
       return res.status(400).json({ success: false, message: 'Already cancelled' });
+    }
+    if ((invoice.creditedAmount ?? 0) > 0) {
+      throw badRequest('This invoice has credit notes. Credit the remaining items with a new credit note instead of cancelling it.');
     }
 
     const paid = Math.round(invoice.amountPaid * 100) / 100;
@@ -419,6 +487,13 @@ router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunctio
         where: { companyId, reference: invoice.invoiceNumber, type: 'sale' },
       });
       let cogsReversed = 0;
+      const restoreByAccount = new Map<string, number>();
+      const typeOf = new Map(
+        (await tx.product.findMany({
+          where: { companyId, id: { in: saleMovements.map((m: { productId: string }) => m.productId) } },
+          select: { id: true, itemType: true },
+        })).map((p: { id: string; itemType: string }) => [p.id, p.itemType])
+      );
       const productIds: string[] = [];
       for (const m of saleMovements) {
         const qty = Math.abs(m.quantity);
@@ -436,6 +511,8 @@ router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunctio
           });
         }
         cogsReversed += m.totalCost;
+        const stock = await inventoryAccountFor(tx, companyId, typeOf.get(m.productId));
+        restoreByAccount.set(stock.id, (restoreByAccount.get(stock.id) ?? 0) + m.totalCost);
         productIds.push(m.productId);
       }
       await syncProductTotals(tx, companyId, productIds);
@@ -448,7 +525,8 @@ router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunctio
       const ar = await systemAccount(tx, companyId, 'ar');
       const sales = await systemAccount(tx, companyId, 'sales');
       const cogs = await systemAccount(tx, companyId, 'cogs');
-      const inventory = await systemAccount(tx, companyId, 'inventory');
+      const taxTotal = round2(invoice.taxTotal ?? 0);
+      const vat = taxTotal > 0 ? await systemAccount(tx, companyId, 'vat_payable') : null;
       await postJournal(tx, {
         companyId,
         locationId: invoice.locationId,
@@ -458,8 +536,9 @@ router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunctio
         reference: invoice.invoiceNumber,
         createdById: req.user!.id,
         lines: [
-          { accountId: sales.id, debit: invoice.total },
-          { accountId: inventory.id, debit: cogsReversed },
+          { accountId: sales.id, debit: round2(invoice.total - taxTotal) },
+          ...(vat ? [{ accountId: vat.id, debit: taxTotal }] : []),
+          ...Array.from(restoreByAccount, ([accountId, amount]) => ({ accountId, debit: amount })),
           { accountId: ar.id, credit: outstanding },
           ...(refundNow > 0 ? [{ accountId: refundAccount.id, credit: refundNow }] : []),
           { accountId: cogs.id, credit: cogsReversed },
@@ -485,6 +564,23 @@ router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunctio
 
     res.json({ success: true });
   } catch (err) { next(err); }
+});
+
+// ---------- CREDIT NOTES (returns and credits) ----------
+router.get('/:id/creditable', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ success: true, data: await creditableLines(req.user!.companyId, req.params.id) });
+  } catch (err) { next(err); }
+});
+
+router.post('/:id/credit-notes', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const note = await createCreditNote(req.user!.companyId, req.params.id, req.user!.id, req.body ?? {});
+    res.status(201).json({ success: true, data: note });
+  } catch (err: any) {
+    if (err?.code === 'P2002') return next(badRequest('Another credit note was saved at the same moment. Please try again.'));
+    next(err);
+  }
 });
 
 // ---------- DELETE (only drafts) ----------

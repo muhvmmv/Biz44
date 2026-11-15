@@ -90,6 +90,9 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
 
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const where = { employeeId: req.params.id };
+    const used = (await prisma.payroll.count({ where })) + (await prisma.attendance.count({ where })) + (await prisma.leave.count({ where }));
+    if (used > 0) throw badRequest('This employee has payroll, attendance or leave records, so they cannot be deleted. Their history is kept.');
     await employeeService.delete(req.params.id, req.user!.companyId);
     res.json({ success: true });
   } catch (err) { next(err); }

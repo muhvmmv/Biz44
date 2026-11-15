@@ -4,10 +4,31 @@ import { CrudService, pick } from '../../services/crud.service';
 import { badRequest } from '../../lib/errors';
 
 import { prisma } from '../../lib/prisma';
+import { customerStatement } from '../../lib/statements';
 const router = Router();
 const customerService = new CrudService('customer');
 
 router.use(authenticate);
+
+/** Parse an optional date; a plain YYYY-MM-DD `to` means the end of that day. */
+function statementDate(value: unknown, endOfDay = false): Date | undefined {
+  if (typeof value !== 'string' || !value) return undefined;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) throw badRequest(`Invalid date: ${value}`);
+  if (endOfDay && /^\d{4}-\d{2}-\d{2}$/.test(value)) d.setHours(23, 59, 59, 999);
+  return d;
+}
+
+// Statement: running balance for a period, aging and open documents.
+router.get('/:id/statement', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = await customerStatement(
+      req.user!.companyId, req.params.id,
+      statementDate(req.query.from), statementDate(req.query.to, true)
+    );
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+});
 
 // Summary (must come BEFORE /:id)
 router.get('/:id/summary', async (req: Request, res: Response, next: NextFunction) => {
@@ -30,7 +51,10 @@ router.get('/:id/summary', async (req: Request, res: Response, next: NextFunctio
     const totalPaid = invoices
       .filter((i) => i.status !== 'draft' && i.status !== 'cancelled')
       .reduce((s: number, i) => s + i.amountPaid, 0);
-    const outstanding = totalSales - totalPaid;
+    const totalCredited = invoices
+      .filter((i) => i.status !== 'draft' && i.status !== 'cancelled')
+      .reduce((s: number, i) => s + (i.creditedAmount ?? 0), 0);
+    const outstanding = totalSales - totalPaid - totalCredited;
 
     const payments = invoices
       .flatMap((i) =>
@@ -49,7 +73,7 @@ router.get('/:id/summary', async (req: Request, res: Response, next: NextFunctio
       success: true,
       data: {
         customer,
-        summary: { totalSales, totalPaid, outstanding, invoiceCount: invoices.length },
+        summary: { totalSales: totalSales - totalCredited, totalPaid, outstanding, invoiceCount: invoices.length },
         invoices,
         payments,
       },
@@ -91,6 +115,8 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
 
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const used = await prisma.invoice.count({ where: { customerId: req.params.id, companyId: req.user!.companyId } });
+    if (used > 0) throw badRequest('This customer has invoices on record, so they cannot be deleted. Their history is kept.');
     await customerService.delete(req.params.id, req.user!.companyId);
     res.json({ success: true });
   } catch (err) { next(err); }

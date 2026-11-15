@@ -1,0 +1,7 @@
+-- AlterTable
+ALTER TABLE "Company" ADD COLUMN     "vatNumber" TEXT,
+ADD COLUMN     "vatRate" DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+-- AlterTable
+ALTER TABLE "invoices" ADD COLUMN     "taxRate" DOUBLE PRECISION NOT NULL DEFAULT 0;
+

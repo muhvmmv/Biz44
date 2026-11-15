@@ -8,7 +8,31 @@ import { purchaseBalance } from '../purchases/purchase.service';
 import { profitAndLoss, cashFlow, monthlyPnl } from '../../lib/reports';
 import { listPaymentAccounts } from '../../lib/accounts';
 import { runStockCheck } from '../../lib/stockCheck';
+import { productionSummary } from '../production/production.service';
+import { Area, can } from '../../lib/permissions';
+import { AppError } from '../../lib/errors';
+import { invoiceBalance } from '../../lib/invoiceBalance';
 const router = Router();
+
+/** Figures each area owns on the dashboard summary; hidden (null) without access. */
+const SUMMARY_AREAS: Record<string, Area> = {
+  revenue: 'money', revenueChange: 'money', revenueThisMonth: 'money', revenueLastMonth: 'money', cogs: 'money', grossProfit: 'money', grossMargin: 'money',
+  opex: 'money', netProfit: 'money', netMargin: 'money', profit: 'money', profitMargin: 'money', expenses: 'money',
+  totalCash: 'money', cashAccounts: 'money', cashIn: 'money', cashOut: 'money', netCash: 'money', topProducts: 'money',
+  outstanding: 'sales', overdueCount: 'sales', unpaidCount: 'sales', dueToday: 'sales', expectedToday: 'sales',
+  totalUnits: 'inventory', inventoryValue: 'inventory', inventoryByStage: 'inventory', production: 'inventory',
+  lowStock: 'inventory', outOfStock: 'inventory',
+  supplierOutstanding: 'purchasing', supplierUnpaidCount: 'purchasing', supplierOverdueAmount: 'purchasing', supplierOverdueCount: 'purchasing',
+};
+
+function limitSummary(summary: Record<string, unknown>, role: string) {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(summary)) {
+    const area = SUMMARY_AREAS[key];
+    out[key] = !area || can(role, area) ? value : null;
+  }
+  return out;
+}
 
 router.use(authenticate);
 
@@ -45,7 +69,7 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
     const dueTodayInvoices = unpaidInvoices.filter(
       (i) => i.dueDate && new Date(i.dueDate).toDateString() === now.toDateString()
     );
-    const outstanding = unpaidInvoices.reduce((s, i) => s + (i.total - i.amountPaid), 0);
+    const outstanding = unpaidInvoices.reduce((s, i) => s + invoiceBalance(i), 0);
 
     const revenueChange = lastMonth.revenue !== 0
       ? ((thisMonth.revenue - lastMonth.revenue) / Math.abs(lastMonth.revenue)) * 100
@@ -79,7 +103,7 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
     // company-wide cache, so a single branch shows its own stock.
     const products = await prisma.product.findMany({
       where: { companyId },
-      select: { id: true, reorderPoint: true },
+      select: { id: true, reorderPoint: true, itemType: true },
     });
     const stock = await stockByProduct(prisma, companyId, req.locationId ?? req.allowedLocationIds);
     const qtyOf = (id: string) => stock.get(id)?.quantity ?? 0;
@@ -88,6 +112,16 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
       Array.from(stock.values()).reduce((s, v) => s + v.value, 0) * 100
     ) / 100;
     const lowStock = products.filter((p) => qtyOf(p.id) > 0 && qtyOf(p.id) <= p.reorderPoint).length;
+
+    // Inventory by stage: raw materials & packaging, work in progress, finished goods.
+    const valueOf = (id: string) => stock.get(id)?.value ?? 0;
+    const round = (n: number) => Math.round(n * 100) / 100;
+    const production = await productionSummary(companyId, periodStart, now, locationIds);
+    const inventoryByStage = {
+      raw: round(products.filter((p) => p.itemType !== 'finished_good').reduce((s, p) => s + valueOf(p.id), 0)),
+      wip: production.wipValue,
+      finished: round(products.filter((p) => p.itemType === 'finished_good').reduce((s, p) => s + valueOf(p.id), 0)),
+    };
     const outOfStock = products.filter((p) => qtyOf(p.id) === 0).length;
 
     // ---- Top products ----
@@ -104,9 +138,7 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
       .sort((a, b) => b.total - a.total)
       .slice(0, 5);
 
-    res.json({
-      success: true,
-      data: {
+    const summary: Record<string, unknown> = {
         months,
         periodStart,
         revenue: pnl.revenue,
@@ -133,18 +165,27 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
         unpaidCount: unpaidInvoices.length,
         totalUnits,
         inventoryValue,
+        inventoryByStage,
+        production: {
+          completedOrders: production.completedOrders,
+          inProgressOrders: production.inProgressOrders,
+          draftOrders: production.draftOrders,
+          totalCost: production.totalCost,
+          wipValue: production.wipValue,
+          products: production.products,
+        },
         lowStock,
         outOfStock,
         dueToday: dueTodayInvoices.length,
-        expectedToday: dueTodayInvoices.reduce((s, i) => s + (i.total - i.amountPaid), 0),
+        expectedToday: dueTodayInvoices.reduce((s, i) => s + invoiceBalance(i), 0),
         topProducts,
         // NEW: supplier payable metrics
         supplierOutstanding,
         supplierUnpaidCount,
         supplierOverdueAmount,
         supplierOverdueCount,
-      },
-    });
+    };
+    res.json({ success: true, data: limitSummary(summary, req.user!.role) });
   } catch (err) { next(err); }
 });
 
@@ -152,6 +193,7 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
 // Revenue, COGS, operating expenses and profit per month, from the ledger.
 router.get('/monthly-chart', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!can(req.user!.role, 'money')) throw new AppError(403, 'Your role does not include financial figures');
     const months = Math.min(Math.max(parseInt(String(req.query.months || '6')) || 6, 1), 24);
     const data = await monthlyPnl(req.user!.companyId, months, await reportLocationIds(req));
     res.json({ success: true, data });
@@ -171,7 +213,7 @@ router.get('/alerts', resolveLocation, async (req: Request, res: Response, next:
     const [openInvoices, purchases, products, stock, cashAccounts, stockReport] = await Promise.all([
       prisma.invoice.findMany({
         where: { companyId, status: { in: ['unpaid', 'partially_paid', 'overdue'] }, ...locFilter },
-        select: { total: true, amountPaid: true, dueDate: true },
+        select: { total: true, amountPaid: true, creditedAmount: true, dueDate: true },
       }),
       prisma.purchase.findMany({
         where: { companyId, ...locFilter },
@@ -192,7 +234,7 @@ router.get('/alerts', resolveLocation, async (req: Request, res: Response, next:
       alerts.push({
         id: 'invoices-overdue', severity: 'danger', count: overdue.length,
         title: `${overdue.length} overdue invoice${overdue.length === 1 ? '' : 's'}`,
-        amount: money(overdue.reduce((s, i) => s + i.total - i.amountPaid, 0)), detail: 'still to collect',
+        amount: money(overdue.reduce((s, i) => s + invoiceBalance(i), 0)), detail: 'still to collect',
         href: '/dashboard/accounting/receivable',
       });
     }
@@ -201,7 +243,7 @@ router.get('/alerts', resolveLocation, async (req: Request, res: Response, next:
       alerts.push({
         id: 'invoices-due-today', severity: 'info', count: dueToday.length,
         title: `${dueToday.length} invoice${dueToday.length === 1 ? '' : 's'} due today`,
-        amount: money(dueToday.reduce((s, i) => s + i.total - i.amountPaid, 0)), detail: 'expected today',
+        amount: money(dueToday.reduce((s, i) => s + invoiceBalance(i), 0)), detail: 'expected today',
         href: '/dashboard/invoices',
       });
     }
@@ -249,13 +291,19 @@ router.get('/alerts', resolveLocation, async (req: Request, res: Response, next:
 
     const order = { danger: 0, warning: 1, info: 2 };
     alerts.sort((a, b) => order[a.severity] - order[b.severity]);
-    res.json({ success: true, data: alerts });
+    // Only alerts about areas the user's role can see.
+    const areaOf: Record<string, Area> = {
+      'invoices-overdue': 'sales', 'invoices-due-today': 'sales', 'suppliers-overdue': 'purchasing',
+      'stock-out': 'inventory', 'stock-low': 'inventory', 'stock-check': 'inventory', 'cash-negative': 'money',
+    };
+    res.json({ success: true, data: alerts.filter((a) => can(req.user!.role, areaOf[a.id] ?? 'money')) });
   } catch (err) { next(err); }
 });
 
 // ---------- RECENT INVOICES ----------
 router.get('/recent-invoices', resolveLocation, async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!can(req.user!.role, 'sales')) throw new AppError(403, 'Your role does not include sales');
     const invoices = await prisma.invoice.findMany({
       where: { companyId: req.user?.companyId, ...locationWhere(req) },
       orderBy: { createdAt: 'desc' },

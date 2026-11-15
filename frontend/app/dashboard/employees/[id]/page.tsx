@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
@@ -47,7 +48,7 @@ export default function EmployeeDetailPage() {
     let active = true;
     apiFetch<{ success: boolean; data: Data }>(`/employees/${id}/summary`)
       .then((res) => { if (active) setData(res.data); })
-      .catch(console.error)
+      .catch((e: unknown) => reportError(e, "Could not load this page"))
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [id]);
@@ -62,7 +63,7 @@ export default function EmployeeDetailPage() {
       setShowAttendance(false);
       setAttForm({ ...attForm, notes: "" });
       load();
-    } catch (err) { console.error(err); }
+    } catch (err) { reportError(err); }
   };
 
   if (loading) return <div className="p-8"><Skeleton className="h-96" /></div>;
