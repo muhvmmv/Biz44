@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   AnimatePresence, motion, useMotionValue, useReducedMotion, useSpring, useTransform, type MotionValue,
 } from "framer-motion";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, LogOut, Moon, Search, Sun, UserRound } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, LogOut, Moon, Search, Sun } from "lucide-react";
 import { NavItem, NavLeaf, matchNav, visibleNav } from "@/lib/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
@@ -50,7 +50,7 @@ export default function Sidebar({ pathname, collapsed, onToggleCollapsed, mobile
         initial={false}
         animate={{ width: collapsed ? RAIL_WIDTH : PANEL_WIDTH }}
         transition={spring}
-        className="glass fixed bottom-3 left-3 top-3 z-40 hidden flex-col rounded-[28px] lg:flex"
+        className="fixed bottom-3 left-3 top-3 z-40 hidden flex-col lg:flex"
       >
         {collapsed ? (
           <Rail nav={nav} active={active} badges={badges} onExpand={onToggleCollapsed} onOpenSearch={onOpenSearch} />
@@ -75,7 +75,7 @@ export default function Sidebar({ pathname, collapsed, onToggleCollapsed, mobile
             <motion.aside
               key="drawer"
               aria-label="Main navigation"
-              className="glass-strong fixed bottom-3 left-3 top-3 z-50 flex w-[min(284px,calc(100vw-24px))] flex-col rounded-[28px] lg:hidden"
+              className="fixed bottom-3 left-3 top-3 z-50 flex w-[min(284px,calc(100vw-24px))] flex-col lg:hidden"
               initial={{ x: -320, opacity: 0.6 }}
               animate={{ x: 0, opacity: 1 }}
               exit={{ x: -320, opacity: 0.6 }}
@@ -104,9 +104,6 @@ function LogoTile({ size = 44 }: { size?: number }) {
   );
 }
 
-function initials(first?: string, last?: string) {
-  return `${first?.[0] ?? ""}${last?.[0] ?? ""}`.toUpperCase() || "?";
-}
 
 // =====================================================================
 // Rail
@@ -117,7 +114,7 @@ function Rail({ nav, active, badges, onExpand, onOpenSearch }: {
   nav: ReturnType<typeof visibleNav>; active: Active; badges: Record<string, number>; onExpand: () => void; onOpenSearch: () => void;
 }) {
   const router = useRouter();
-  const { user, logout } = useAuth();
+  const { logout } = useAuth();
   const { theme, toggle } = useTheme();
   const mouseY = useMotionValue(Infinity);
   const [pop, setPop] = useState<Pop | null>(null);
@@ -141,8 +138,9 @@ function Rail({ nav, active, badges, onExpand, onOpenSearch }: {
   const rect = (el: HTMLElement) => el.getBoundingClientRect();
 
   return (
-    <div ref={railRef} className="relative flex h-full flex-col items-center py-4">
-      {/* Brand + expand arrow */}
+    <div ref={railRef} className="relative flex h-full flex-col justify-between gap-3">
+      {/* Cluster 1: brand + search */}
+      <div className="glass relative flex flex-col items-center gap-3 rounded-[26px] py-3.5">
       <Link href="/dashboard" aria-label="Biz44 home" className="relative">
         <LogoTile />
       </Link>
@@ -152,7 +150,7 @@ function Rail({ nav, active, badges, onExpand, onOpenSearch }: {
         aria-label="Open sidebar"
         whileHover={{ scale: 1.12 }}
         whileTap={{ scale: 0.92 }}
-        className="glass-strong absolute -right-3 top-6 flex h-7 w-7 items-center justify-center rounded-full text-ink-soft hover:text-ink"
+        className="glass-strong absolute -right-3 top-5 flex h-7 w-7 items-center justify-center rounded-full text-ink-soft hover:text-ink"
       >
         <ChevronRight size={15} />
       </motion.button>
@@ -164,15 +162,16 @@ function Rail({ nav, active, badges, onExpand, onOpenSearch }: {
         aria-label="Search"
         onMouseEnter={(e) => show({ kind: "tooltip", key: "search", top: rect(e.currentTarget).top + rect(e.currentTarget).height / 2, label: "Search  ⌘K" })}
         onMouseLeave={hideTooltip}
-        className="mt-4 flex h-10 w-10 items-center justify-center rounded-[13px] border border-border-soft bg-surface/80 text-ink-soft shadow-card transition-colors hover:text-ink"
+        className="flex h-11 w-11 items-center justify-center rounded-[14px] border border-border-soft bg-surface/80 text-ink-soft shadow-card transition-colors hover:text-ink"
       >
-        <Search size={17} />
+        <Search size={18} />
       </button>
-      <div className="my-3 h-px w-8 bg-border-soft" aria-hidden="true" />
+      </div>
 
-      {/* Apps */}
+      {/* Cluster 2: pages */}
+      <div className="glass flex min-h-0 flex-col rounded-[28px]">
       <nav
-        className="no-scrollbar flex w-full flex-1 flex-col items-center gap-1.5 overflow-y-auto overflow-x-hidden px-2 py-1"
+        className="no-scrollbar flex w-full min-h-0 flex-col items-center gap-1.5 overflow-y-auto overflow-x-hidden px-2 py-3"
         onMouseMove={(e) => mouseY.set(e.clientY)}
         onMouseLeave={() => { mouseY.set(Infinity); hideTooltip(); }}
       >
@@ -195,7 +194,7 @@ function Rail({ nav, active, badges, onExpand, onOpenSearch }: {
                   onClick={(el) => {
                     if (item.children) {
                       setPop((cur) => (cur?.kind === "menu" && cur.key === item.name ? null : {
-                        kind: "menu", key: item.name, top: rect(el).top, label: item.name, leaves: item.children, tint: item.tint, Icon: item.icon,
+                        kind: "menu", key: item.name, top: rect(el).top, label: item.name, leaves: item.children, Icon: item.icon,
                       }));
                     } else if (item.href) {
                       setPop(null);
@@ -208,9 +207,10 @@ function Rail({ nav, active, badges, onExpand, onOpenSearch }: {
           </div>
         ))}
       </nav>
+      </div>
 
-      {/* Theme + account */}
-      <div className="mt-3 flex flex-col items-center gap-2.5">
+      {/* Cluster 3: theme + sign out */}
+      <div className="glass flex flex-col items-center gap-2.5 rounded-[26px] py-3.5">
         <button
           type="button"
           onClick={toggle}
@@ -218,7 +218,7 @@ function Rail({ nav, active, badges, onExpand, onOpenSearch }: {
           aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
           onMouseEnter={(e) => show({ kind: "tooltip", key: "theme", top: rect(e.currentTarget).top + rect(e.currentTarget).height / 2, label: theme === "dark" ? "Light mode" : "Dark mode" })}
           onMouseLeave={hideTooltip}
-          className="app-icon flex h-10 w-10 items-center justify-center overflow-hidden rounded-[13px] bg-gradient-to-br from-sky-400 to-indigo-600 text-white"
+          className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-[13px] border border-border-soft bg-surface text-ink shadow-card transition-colors hover:bg-surface-muted"
         >
           <AnimatePresence mode="wait" initial={false}>
             <motion.span key={theme} initial={{ rotate: -90, scale: 0.4, opacity: 0 }} animate={{ rotate: 0, scale: 1, opacity: 1 }} exit={{ rotate: 90, scale: 0.4, opacity: 0 }} transition={{ duration: 0.25 }}>
@@ -229,15 +229,13 @@ function Rail({ nav, active, badges, onExpand, onOpenSearch }: {
         <button
           type="button"
           data-rail-icon
-          aria-label="Account"
-          onClick={(e) => {
-            const r = rect(e.currentTarget);
-            setPop((cur) => (cur?.kind === "menu" && cur.key === "account" ? null : { kind: "menu", key: "account", top: r.top - 60, label: "Account" }));
-          }}
-          className="relative flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-zinc-700 to-zinc-900 text-xs font-bold text-white ring-2 ring-surface"
+          aria-label="Sign out"
+          onClick={() => logout()}
+          onMouseEnter={(e) => show({ kind: "tooltip", key: "logout", top: rect(e.currentTarget).top + rect(e.currentTarget).height / 2, label: "Sign out" })}
+          onMouseLeave={hideTooltip}
+          className="flex h-10 w-10 items-center justify-center rounded-[13px] border border-border-soft bg-surface text-ink-soft shadow-card transition-colors hover:bg-danger-soft hover:text-danger"
         >
-          {initials(user?.firstName, user?.lastName)}
-          <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-green-500 ring-2 ring-surface" aria-hidden="true" />
+          <LogOut size={18} />
         </button>
       </div>
 
@@ -285,10 +283,10 @@ function Rail({ nav, active, badges, onExpand, onOpenSearch }: {
                     onClick={() => setPop(null)}
                     className={cn(
                       "glass-strong flex items-center gap-3 rounded-2xl py-2 pl-2 pr-5 text-sm font-semibold text-ink transition-transform hover:-translate-y-0.5 hover:rotate-0",
-                      isActive && "ring-2 ring-brand/60"
+                      isActive && "ring-2 ring-charcoal/70"
                     )}
                   >
-                    <span className={cn("app-icon flex h-8 w-8 items-center justify-center rounded-[10px] bg-gradient-to-br text-white", pop.tint)}>
+                    <span className={cn("flex h-8 w-8 items-center justify-center rounded-[10px]", isActive ? "bg-charcoal text-ivory" : "border border-border-soft bg-surface text-ink")}>
                       <Icon size={15} />
                     </span>
                     {leaf.name}
@@ -298,33 +296,8 @@ function Rail({ nav, active, badges, onExpand, onOpenSearch }: {
             })}
           </motion.div>
         )}
-        {pop?.kind === "menu" && pop.key === "account" && (
-          <AccountPop key="account" top={pop.top} onClose={() => setPop(null)} onLogout={logout} />
-        )}
       </AnimatePresence>
     </div>
-  );
-}
-
-function AccountPop({ top, onClose, onLogout }: { top: number; onClose: () => void; onLogout: () => void }) {
-  const { user } = useAuth();
-  return (
-    <motion.div
-      data-rail-pop
-      initial={{ opacity: 0, x: -10, scale: 0.95 }}
-      animate={{ opacity: 1, x: 0, scale: 1 }}
-      exit={{ opacity: 0, x: -10, scale: 0.95 }}
-      transition={spring}
-      className="glass-strong fixed z-[60] w-60 rounded-2xl p-2"
-      style={{ top, left: RAIL_WIDTH + 24 }}
-    >
-      <div className="px-2 pb-2 pt-1">
-        <p className="truncate text-sm font-semibold text-ink">{user?.firstName} {user?.lastName}</p>
-        <p className="truncate text-xs text-ink-soft">{user?.email}</p>
-      </div>
-      <Link href="/dashboard/profile" onClick={onClose} className="flex items-center gap-2 rounded-xl px-2 py-2 text-sm text-ink hover:bg-surface-muted"><UserRound size={15} /> Your profile</Link>
-      <button type="button" onClick={() => { onClose(); onLogout(); }} className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-sm text-danger hover:bg-danger-soft"><LogOut size={15} /> Sign out</button>
-    </motion.div>
   );
 }
 
@@ -376,13 +349,14 @@ function DockIcon({ item, mouseY, active, badge, open, onHover, onLeave, onClick
         whileTap={{ scale: 0.9 }}
         style={{ width: size, height: size }}
         className={cn(
-          "app-icon relative flex shrink-0 items-center justify-center rounded-[14px] bg-gradient-to-br text-white outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2",
-          item.tint ?? "from-zinc-400 to-zinc-600",
-          (active || open) && "ring-2 ring-white/70 ring-offset-0"
+          "relative flex shrink-0 items-center justify-center rounded-[14px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2",
+          active || open
+            ? "bg-charcoal text-ivory shadow-raised"
+            : "border border-border-soft bg-surface text-ink-soft shadow-card hover:text-ink"
         )}
       >
         <motion.span style={{ width: iconSize, height: iconSize }} className="flex items-center justify-center">
-          <Icon className="h-full w-full" strokeWidth={2.1} />
+          <Icon className="h-full w-full" strokeWidth={1.9} />
         </motion.span>
         <AnimatePresence>
           {badge > 0 && (
@@ -412,16 +386,17 @@ function Panel({ nav, active, badges, onCollapse, onOpenSearch, onNavigate, mobi
   const { user, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const [open, setOpen] = useState<Set<string>>(() => new Set(active?.leaf ? [active.item.name] : []));
-  const [accountOpen, setAccountOpen] = useState(false);
+  const cluster = mobile ? "glass-strong" : "glass";
   const toggleGroup = (name: string) => setOpen((s) => { const n = new Set(s); if (n.has(name)) n.delete(name); else n.add(name); return n; });
 
   return (
     <motion.div
-      className="relative flex h-full min-w-0 flex-col"
+      className="relative flex h-full min-w-0 flex-col justify-between gap-3"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1, transition: { delay: mobile ? 0 : 0.08, duration: 0.2 } }}
     >
-      {/* Workspace header */}
+      {/* Cluster 1: workspace + search */}
+      <div className={cn(cluster, "relative rounded-[26px] pb-3")}>
       <div className="flex items-center gap-3 px-4 pb-3 pt-4">
         <Link href="/dashboard" onClick={onNavigate} aria-label="Biz44 home"><LogoTile size={42} /></Link>
         <div className="min-w-0 flex-1">
@@ -429,7 +404,7 @@ function Panel({ nav, active, badges, onCollapse, onOpenSearch, onNavigate, mobi
           <p className="truncate text-xs text-ink-soft">Biz44 workspace</p>
         </div>
         {user?.role && (
-          <span className="rounded-full bg-gradient-to-br from-orange-400 to-orange-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
+          <span className="rounded-full bg-charcoal px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-ivory">
             {user.role === "admin" ? "Admin" : ROLE_LABELS[user.role] ?? user.role}
           </span>
         )}
@@ -440,7 +415,7 @@ function Panel({ nav, active, badges, onCollapse, onOpenSearch, onNavigate, mobi
         aria-label={mobile ? "Close menu" : "Collapse sidebar"}
         whileHover={{ scale: 1.12 }}
         whileTap={{ scale: 0.92 }}
-        className="glass-strong absolute -right-3 top-6 flex h-7 w-7 items-center justify-center rounded-full text-ink-soft hover:text-ink"
+        className="glass-strong absolute -right-3 top-5 flex h-7 w-7 items-center justify-center rounded-full text-ink-soft hover:text-ink"
       >
         <ChevronLeft size={15} />
       </motion.button>
@@ -449,15 +424,18 @@ function Panel({ nav, active, badges, onCollapse, onOpenSearch, onNavigate, mobi
         <button
           type="button"
           onClick={onOpenSearch}
-          className="flex h-10 w-full items-center gap-2 rounded-2xl border border-border-soft bg-surface/70 px-3 text-sm text-ink-faint shadow-card transition-colors hover:border-brand/50"
+          className="flex h-10 w-full items-center gap-2 rounded-2xl border border-border-soft bg-surface/70 px-3 text-sm text-ink-faint shadow-card transition-colors hover:border-border-strong"
         >
           <Search size={16} />
           <span className="flex-1 text-left">Search</span>
           <kbd className="rounded-md bg-surface-muted px-1.5 text-[11px] text-ink-soft">⌘K</kbd>
         </button>
       </div>
+      </div>
 
-      <nav className="no-scrollbar mt-2 flex-1 overflow-y-auto px-3 pb-2">
+      {/* Cluster 2: pages */}
+      <div className={cn(cluster, "flex min-h-0 flex-col rounded-[28px]")}>
+      <nav className="no-scrollbar min-h-0 overflow-y-auto px-3 pb-3 pt-1">
         {nav.map((section) => (
           <div key={section.label} className="mt-3">
             <p className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wider text-ink-faint">{section.label}</p>
@@ -469,8 +447,8 @@ function Panel({ nav, active, badges, onCollapse, onOpenSearch, onNavigate, mobi
                 const Icon = item.icon;
                 const row = (
                   <>
-                    <span className={cn("app-icon flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-br text-white", item.tint)}>
-                      <Icon size={16} strokeWidth={2.1} />
+                    <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] transition-colors", containsActive ? "bg-charcoal text-ivory" : "border border-border-soft bg-surface text-ink-soft")}>
+                      <Icon size={16} strokeWidth={1.9} />
                     </span>
                     <span className="flex-1 truncate text-left">{item.name}</span>
                     {badge > 0 && <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">{badge}</span>}
@@ -517,7 +495,7 @@ function Panel({ nav, active, badges, onCollapse, onOpenSearch, onNavigate, mobi
                                   )}
                                 >
                                   {isActive && <ActiveBg />}
-                                  <span className={cn("relative h-1.5 w-1.5 rounded-full", isActive ? "bg-brand" : "bg-border-strong")} aria-hidden="true" />
+                                  <span className={cn("relative h-1.5 w-1.5 rounded-full", isActive ? "bg-charcoal" : "bg-border-strong")} aria-hidden="true" />
                                   <span className="relative">{leaf.name}</span>
                                 </Link>
                               </li>
@@ -534,47 +512,30 @@ function Panel({ nav, active, badges, onCollapse, onOpenSearch, onNavigate, mobi
         ))}
       </nav>
 
-      {/* Theme switch + account */}
-      <div className="space-y-1 border-t border-border-soft/70 px-3 pb-3 pt-2">
+      </div>
+
+      {/* Cluster 3: dark mode + sign out */}
+      <div className={cn(cluster, "space-y-1 rounded-[26px] p-2")}>
         <div className="flex items-center gap-3 rounded-2xl px-2 py-1.5">
-          <span className="app-icon flex h-8 w-8 items-center justify-center rounded-[10px] bg-gradient-to-br from-sky-400 to-indigo-600 text-white">
+          <span className="flex h-8 w-8 items-center justify-center rounded-[10px] border border-border-soft bg-surface text-ink-soft">
             {theme === "dark" ? <Moon size={15} /> : <Sun size={15} />}
           </span>
           <span className="flex-1 text-sm font-semibold text-ink">Dark mode</span>
           <Switch on={theme === "dark"} onChange={(on) => setTheme(on ? "dark" : "light")} label="Dark mode" />
         </div>
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => setAccountOpen((o) => !o)}
-            aria-expanded={accountOpen}
-            className="flex w-full items-center gap-3 rounded-2xl px-2 py-1.5 text-left hover:bg-surface/60"
-          >
-            <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-zinc-700 to-zinc-900 text-xs font-bold text-white">
-              {initials(user?.firstName, user?.lastName)}
-              <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-green-500 ring-2 ring-surface" aria-hidden="true" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-semibold text-ink">{user?.firstName} {user?.lastName}</span>
-              <span className="block truncate text-xs text-ink-soft">{user?.email}</span>
-            </span>
-            <ChevronsUpDown size={15} className="text-ink-faint" />
-          </button>
-          <AnimatePresence>
-            {accountOpen && (
-              <motion.div
-                initial={{ opacity: 0, y: 6, scale: 0.97 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 6, scale: 0.97 }}
-                transition={{ duration: 0.15 }}
-                className="glass-strong absolute bottom-full left-0 right-0 mb-2 rounded-2xl p-1.5"
-              >
-                <Link href="/dashboard/profile" onClick={() => { setAccountOpen(false); onNavigate(); }} className="flex items-center gap-2 rounded-xl px-2.5 py-2 text-sm text-ink hover:bg-surface-muted"><UserRound size={15} /> Your profile</Link>
-                <button type="button" onClick={() => { setAccountOpen(false); logout(); }} className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm text-danger hover:bg-danger-soft"><LogOut size={15} /> Sign out</button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+        <button
+          type="button"
+          onClick={() => logout()}
+          className="group flex w-full items-center gap-3 rounded-2xl px-2 py-1.5 text-left transition-colors hover:bg-danger-soft"
+        >
+          <span className="flex h-8 w-8 items-center justify-center rounded-[10px] border border-border-soft bg-surface text-ink-soft group-hover:text-danger">
+            <LogOut size={15} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-ink group-hover:text-danger">Sign out</span>
+            <span className="block truncate text-xs text-ink-soft">{user?.email}</span>
+          </span>
+        </button>
       </div>
     </motion.div>
   );
@@ -600,9 +561,9 @@ function Switch({ on, onChange, label }: { on: boolean; onChange: (on: boolean) 
       aria-checked={on}
       aria-label={label}
       onClick={() => onChange(!on)}
-      className={cn("relative flex h-6 w-11 items-center rounded-full p-0.5 transition-colors", on ? "bg-brand justify-end" : "bg-border-strong justify-start")}
+      className={cn("relative flex h-6 w-11 items-center rounded-full p-0.5 transition-colors", on ? "bg-charcoal justify-end" : "bg-border-strong justify-start")}
     >
-      <motion.span layout transition={{ type: "spring", stiffness: 600, damping: 32 }} className="h-5 w-5 rounded-full bg-white shadow" />
+      <motion.span layout transition={{ type: "spring", stiffness: 600, damping: 32 }} className="h-5 w-5 rounded-full bg-ivory shadow" />
     </button>
   );
 }

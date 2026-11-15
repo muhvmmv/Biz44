@@ -168,7 +168,7 @@ export default function DashboardPage() {
             {branch && <> · <span className="text-ink">{branch}</span></>}
           </p>
           <h1 className="mt-1 text-3xl font-bold tracking-tight text-ink sm:text-4xl">
-            {greeting()}, <span className="bg-gradient-to-r from-orange-500 to-orange-600 bg-clip-text text-transparent">{user?.firstName || "there"}</span>
+            {greeting()}, <span>{user?.firstName || "there"}</span>
           </h1>
           {summary && (
             <p className="mt-1.5 text-sm text-ink-soft">
@@ -193,27 +193,27 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <motion.div variants={rise}>
                     <KpiCard
-                      label="Revenue" value={summary.revenue ?? 0} format={format} icon={<TrendingUp size={17} />} tint="from-orange-400 to-orange-600"
-                      change={summary.revenueChange} changeLabel="vs last month" series={chart.map((m) => m.revenue)} color="brand" href="/dashboard/reports"
+                      label="Revenue" value={summary.revenue ?? 0} format={format} icon={<TrendingUp size={17} />}
+                      change={summary.revenueChange} changeLabel="vs last month" series={chart.map((m) => m.revenue)} href="/dashboard/reports"
                     />
                   </motion.div>
                   <motion.div variants={rise}>
                     <KpiCard
-                      label="Gross profit" value={summary.grossProfit ?? 0} format={format} icon={<Boxes size={17} />} tint="from-emerald-400 to-green-600"
-                      note={`${(summary.grossMargin ?? 0).toFixed(1)}% margin`} series={chart.map((m) => m.grossProfit)} color="green" href="/dashboard/accounting/profit-loss"
+                      label="Gross profit" value={summary.grossProfit ?? 0} format={format} icon={<Boxes size={17} />}
+                      note={`${(summary.grossMargin ?? 0).toFixed(1)}% margin`} series={chart.map((m) => m.grossProfit)} href="/dashboard/accounting/profit-loss"
                     />
                   </motion.div>
                   <motion.div variants={rise}>
                     <KpiCard
-                      label="Net profit" value={summary.netProfit ?? 0} format={format} icon={<Wallet size={17} />} tint="from-violet-400 to-purple-600"
-                      note={`${(summary.netMargin ?? 0).toFixed(1)}% margin`} series={chart.map((m) => m.netProfit)} color="violet" href="/dashboard/accounting/profit-loss"
+                      label="Net profit" value={summary.netProfit ?? 0} format={format} icon={<Wallet size={17} />}
+                      note={`${(summary.netMargin ?? 0).toFixed(1)}% margin`} series={chart.map((m) => m.netProfit)} href="/dashboard/accounting/profit-loss"
                       negative={(summary.netProfit ?? 0) < 0}
                     />
                   </motion.div>
                   <motion.div variants={rise}>
                     <KpiCard
-                      label="Outstanding" value={summary.outstanding ?? 0} format={format} icon={<Receipt size={17} />} tint="from-sky-400 to-blue-600"
-                      note={`${summary.unpaidCount ?? 0} unpaid invoice${summary.unpaidCount === 1 ? "" : "s"}`} color="blue" href="/dashboard/accounting/receivable"
+                      label="Outstanding" value={summary.outstanding ?? 0} format={format} icon={<Receipt size={17} />}
+                      note={`${summary.unpaidCount ?? 0} unpaid invoice${summary.unpaidCount === 1 ? "" : "s"}`} href="/dashboard/accounting/receivable"
                       progress={summary.outstanding ? Math.min(1, (summary.expectedToday ?? 0) / summary.outstanding) : 0}
                     />
                   </motion.div>
@@ -270,7 +270,7 @@ function PanelHead({ title, href, linkLabel = "View all", extra }: { title: stri
       <div className="flex items-center gap-2">
         {extra}
         {href && (
-          <Link href={href} className="group inline-flex items-center gap-0.5 text-xs font-semibold text-ink-soft hover:text-brand-dark">
+          <Link href={href} className="group inline-flex items-center gap-0.5 text-xs font-semibold text-ink-soft hover:text-ink">
             {linkLabel}<ChevronRight size={14} className="transition-transform group-hover:translate-x-0.5" />
           </Link>
         )}
@@ -288,10 +288,10 @@ function RangePicker({ value, onChange }: { value: number; onChange: (v: number)
           role="tab"
           aria-selected={value === r.value}
           onClick={() => onChange(r.value)}
-          className={cn("relative rounded-full px-3.5 py-1.5 text-sm font-semibold transition-colors", value === r.value ? "text-white" : "text-ink-soft hover:text-ink")}
+          className={cn("relative rounded-full px-3.5 py-1.5 text-sm font-semibold transition-colors", value === r.value ? "text-ivory" : "text-ink-soft hover:text-ink")}
         >
           {value === r.value && (
-            <motion.span layoutId="range-pill" className="absolute inset-0 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 shadow" transition={{ type: "spring", stiffness: 420, damping: 32 }} />
+            <motion.span layoutId="range-pill" className="absolute inset-0 rounded-full bg-charcoal shadow" transition={{ type: "spring", stiffness: 420, damping: 32 }} />
           )}
           <span className="relative">{r.label}</span>
         </button>
@@ -357,20 +357,20 @@ function BalanceCard({ summary, format, currency }: { summary: Summary; format: 
   );
 }
 
-const SPARK: Record<string, string> = { brand: "#F05A28", green: "#16A34A", violet: "#7C3AED", blue: "#3B82F6" };
 
 function KpiCard({
-  label, value, format, icon, tint, change, changeLabel, note, series, color, href, negative, progress,
+  label, value, format, icon, change, changeLabel, note, series, href, negative, progress,
 }: {
-  label: string; value: number; format: (n: number) => string; icon: ReactNode; tint: string;
-  change?: number | null; changeLabel?: string; note?: string; series?: number[]; color: string; href: string; negative?: boolean; progress?: number;
+  label: string; value: number; format: (n: number) => string; icon: ReactNode;
+  change?: number | null; changeLabel?: string; note?: string; series?: number[]; color?: string; href: string; negative?: boolean; progress?: number;
 }) {
   const up = (change ?? 0) >= 0;
+  const c = useChartColors();
   const data = (series ?? []).map((v, i) => ({ i, v }));
   return (
     <Link href={href} className="lift group @container relative flex h-full flex-col overflow-hidden rounded-[22px] border border-border-soft bg-surface p-4 shadow-card">
       <div className="flex items-center justify-between">
-        <span className={cn("app-icon flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br text-white", tint)}>{icon}</span>
+        <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-border-soft bg-surface-muted text-ink">{icon}</span>
         <ArrowUpRight size={16} className="text-ink-faint transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-ink" />
       </div>
       <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-ink-soft">{label}</p>
@@ -390,19 +390,19 @@ function KpiCard({
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
               <defs>
-                <linearGradient id={`spark-${color}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={SPARK[color]} stopOpacity={0.35} />
-                  <stop offset="100%" stopColor={SPARK[color]} stopOpacity={0} />
+                <linearGradient id={`spark-${label.replace(/\s/g, "")}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={c.strong} stopOpacity={0.18} />
+                  <stop offset="100%" stopColor={c.strong} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <Area type="monotone" dataKey="v" stroke={SPARK[color]} strokeWidth={2} fill={`url(#spark-${color})`} animationDuration={1400} />
+              <Area type="monotone" dataKey="v" stroke={c.strong} strokeWidth={2} fill={`url(#spark-${label.replace(/\s/g, "")})`} animationDuration={1400} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
       ) : progress !== undefined ? (
         <div className="mt-auto pt-3">
           <div className="h-1.5 overflow-hidden rounded-full bg-surface-muted">
-            <motion.div className="h-full rounded-full bg-gradient-to-r from-sky-400 to-blue-600" initial={{ width: 0 }} animate={{ width: `${Math.max(4, progress * 100)}%` }} transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1], delay: 0.3 }} />
+            <motion.div className="h-full rounded-full bg-charcoal" initial={{ width: 0 }} animate={{ width: `${Math.max(4, progress * 100)}%` }} transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1], delay: 0.3 }} />
           </div>
           <p className="mt-1 text-[11px] text-ink-faint">Due today vs outstanding</p>
         </div>
@@ -431,8 +431,8 @@ function PerformanceChart({ data, format, symbol }: { data: MonthRow[]; format: 
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const rows = data.map((m) => ({ month: monthLabel(m.month), Sales: m.revenue, Expenses: m.cogs + m.opex, Profit: m.netProfit }));
   const series = [
-    { key: "Sales", color: c.brand },
-    { key: "Expenses", color: c.muted },
+    { key: "Sales", color: c.blue },
+    { key: "Expenses", color: c.red },
     { key: "Profit", color: c.strong },
   ];
   const toggle = (k: string) => setHidden((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
@@ -465,8 +465,12 @@ function PerformanceChart({ data, format, symbol }: { data: MonthRow[]; format: 
             <ComposedChart data={rows} margin={{ top: 8, right: 4, bottom: 0, left: -8 }} barGap={4}>
               <defs>
                 <linearGradient id="bar-sales" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={c.brand} stopOpacity={1} />
-                  <stop offset="100%" stopColor={c.brand} stopOpacity={0.55} />
+                  <stop offset="0%" stopColor={c.blue} stopOpacity={1} />
+                  <stop offset="100%" stopColor={c.blue} stopOpacity={0.7} />
+                </linearGradient>
+                <linearGradient id="bar-expenses" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={c.red} stopOpacity={0.95} />
+                  <stop offset="100%" stopColor={c.red} stopOpacity={0.65} />
                 </linearGradient>
               </defs>
               <CartesianGrid stroke={c.grid} strokeDasharray="4 6" vertical={false} />
@@ -474,9 +478,9 @@ function PerformanceChart({ data, format, symbol }: { data: MonthRow[]; format: 
               <YAxis tickLine={false} axisLine={false} tick={{ fill: c.axis, fontSize: 11 }} tickFormatter={(v: number) => compact(symbol, v)} width={56} />
               <Tooltip cursor={{ fill: c.grid, opacity: 0.5, radius: 8 } as object} content={<ChartTooltip format={format} />} />
               {!hidden.has("Sales") && <Bar dataKey="Sales" fill="url(#bar-sales)" radius={[8, 8, 3, 3]} maxBarSize={26} animationDuration={1100} />}
-              {!hidden.has("Expenses") && <Bar dataKey="Expenses" fill={c.muted} radius={[8, 8, 3, 3]} maxBarSize={26} animationDuration={1100} animationBegin={150} />}
+              {!hidden.has("Expenses") && <Bar dataKey="Expenses" fill="url(#bar-expenses)" radius={[8, 8, 3, 3]} maxBarSize={26} animationDuration={1100} animationBegin={150} />}
               {!hidden.has("Profit") && (
-                <Line type="monotone" dataKey="Profit" stroke={c.strong} strokeWidth={2.5} dot={{ r: 3, strokeWidth: 0, fill: c.strong }} activeDot={{ r: 5 }} animationDuration={1500} animationBegin={300} />
+                <Line type="monotone" dataKey="Profit" stroke={c.strong} strokeWidth={2.5} dot={{ r: 3.5, strokeWidth: 2, stroke: c.tooltipBg, fill: c.strong }} activeDot={{ r: 5 }} animationDuration={1500} animationBegin={300} />
               )}
             </ComposedChart>
           </ResponsiveContainer>
@@ -536,11 +540,7 @@ function NeedsAttention({ summary, format }: { summary: Summary; format: (n: num
   if (summary.supplierUnpaidCount !== null) tiles.push({ key: "supplier", label: "Supplier payments", count: summary.supplierOverdueCount ?? 0, sub: summary.supplierOutstanding ? `${format(summary.supplierOutstanding)} owed` : "Nothing owed", href: "/dashboard/accounting/payable", icon: <Truck size={20} />, tone: (summary.supplierOverdueCount ?? 0) > 0 ? "danger" : "warning" });
   if (summary.lowStock !== null) tiles.push({ key: "stock", label: "Low stock", count: (summary.lowStock ?? 0) + (summary.outOfStock ?? 0), sub: summary.outOfStock ? `${summary.outOfStock} out of stock` : "At or below reorder level", href: "/dashboard/inventory/products", icon: <PackageX size={20} />, tone: "warning" });
   if (summary.dueToday !== null) tiles.push({ key: "today", label: "Due today", count: summary.dueToday, sub: summary.expectedToday ? `${format(summary.expectedToday)} expected` : "Nothing due", href: "/dashboard/invoices", icon: <CalendarClock size={20} />, tone: "info" });
-  const tone = {
-    danger: "from-red-400 to-rose-600 shadow-[0_8px_20px_-8px_rgb(225_29_72/0.7)]",
-    warning: "from-amber-300 to-amber-500 shadow-[0_8px_20px_-8px_rgb(245_158_11/0.7)]",
-    info: "from-sky-400 to-blue-600 shadow-[0_8px_20px_-8px_rgb(37_99_235/0.7)]",
-  };
+
   if (tiles.length === 0) return null;
   return (
     <Panel>
@@ -550,8 +550,13 @@ function NeedsAttention({ summary, format }: { summary: Summary; format: (n: num
           <motion.div key={t.key} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 + i * 0.07 }}>
             <Link href={t.href} className="lift group flex h-full flex-col rounded-[20px] border border-border-soft bg-surface-muted p-4">
               <span className="relative inline-flex w-fit">
-                <span className={cn("flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br text-white", t.count > 0 ? tone[t.tone] : "from-zinc-300 to-zinc-400 dark:from-zinc-600")}>{t.icon}</span>
-                {t.count > 0 && <span className="absolute -right-0.5 -top-0.5 h-3 w-3 animate-ping rounded-full bg-red-500/70" aria-hidden="true" />}
+                <span className={cn("flex h-11 w-11 items-center justify-center rounded-2xl", t.count > 0 ? "bg-charcoal text-ivory shadow-raised" : "border border-border-soft bg-surface text-ink-faint")}>{t.icon}</span>
+                {t.count > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-3 w-3" aria-hidden="true">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500/60" />
+                    <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500 ring-2 ring-surface" />
+                  </span>
+                )}
               </span>
               <p className="mt-3 text-2xl font-bold tracking-tight text-ink"><CountUp value={t.count} duration={1} /></p>
               <p className="text-sm font-semibold text-ink">{t.label}</p>
@@ -567,9 +572,9 @@ function NeedsAttention({ summary, format }: { summary: Summary; format: (n: num
 function InventoryByStage({ stages, format }: { stages: { raw: number; wip: number; finished: number }; format: (n: number) => string }) {
   const total = stages.raw + stages.wip + stages.finished;
   const parts = [
-    { key: "raw", label: "Raw materials & packaging", value: stages.raw, cls: "from-sky-400 to-blue-600", dot: "bg-blue-500" },
-    { key: "wip", label: "Work in progress", value: stages.wip, cls: "from-violet-400 to-purple-600", dot: "bg-purple-500" },
-    { key: "finished", label: "Finished goods", value: stages.finished, cls: "from-orange-400 to-orange-600", dot: "bg-orange-500" },
+    { key: "raw", label: "Raw materials & packaging", value: stages.raw, cls: "bg-ink-faint", dot: "bg-ink-faint" },
+    { key: "wip", label: "Work in progress", value: stages.wip, cls: "bg-ink-soft", dot: "bg-ink-soft" },
+    { key: "finished", label: "Finished goods", value: stages.finished, cls: "bg-charcoal", dot: "bg-charcoal" },
   ];
   return (
     <Panel className="h-full">
@@ -580,7 +585,7 @@ function InventoryByStage({ stages, format }: { stages: { raw: number; wip: numb
         {total > 0 && parts.map((p, i) => (
           <motion.div
             key={p.key}
-            className={cn("h-full rounded-full bg-gradient-to-r", p.cls)}
+            className={cn("h-full rounded-full", p.cls)}
             initial={{ width: 0 }}
             animate={{ width: `${(p.value / total) * 100}%` }}
             transition={{ duration: 1.1, delay: 0.3 + i * 0.12, ease: [0.16, 1, 0.3, 1] }}
@@ -612,15 +617,12 @@ function ProductionThisMonth({ production, format }: { production: NonNullable<S
           <svg viewBox="0 0 80 80" className="h-full w-full -rotate-90">
             <circle cx="40" cy="40" r={R} fill="none" strokeWidth="9" className="stroke-surface-muted" />
             <motion.circle
-              cx="40" cy="40" r={R} fill="none" strokeWidth="9" strokeLinecap="round" stroke="url(#prod-ring)"
+              cx="40" cy="40" r={R} fill="none" strokeWidth="9" strokeLinecap="round" className="stroke-charcoal"
               strokeDasharray={C}
               initial={{ strokeDashoffset: C }}
               animate={{ strokeDashoffset: C * (1 - done) }}
               transition={{ duration: 1.4, ease: [0.16, 1, 0.3, 1], delay: 0.3 }}
             />
-            <defs>
-              <linearGradient id="prod-ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#A78BFA" /><stop offset="100%" stopColor="#7C3AED" /></linearGradient>
-            </defs>
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <span className="text-xl font-bold text-ink"><CountUp value={production.completedOrders} /></span>
@@ -643,7 +645,7 @@ function ProductionThisMonth({ production, format }: { production: NonNullable<S
               </div>
               {p.yieldPercent !== null && (
                 <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-muted">
-                  <motion.div className="h-full rounded-full bg-gradient-to-r from-violet-400 to-purple-600" initial={{ width: 0 }} animate={{ width: `${Math.min(100, p.yieldPercent)}%` }} transition={{ duration: 1.1, delay: 0.4 }} />
+                  <motion.div className="h-full rounded-full bg-charcoal" initial={{ width: 0 }} animate={{ width: `${Math.min(100, p.yieldPercent)}%` }} transition={{ duration: 1.1, delay: 0.4 }} />
                 </div>
               )}
             </li>
@@ -659,7 +661,7 @@ function ProductionThisMonth({ production, format }: { production: NonNullable<S
 function initialsOf(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
 }
-const AVATAR = ["from-orange-400 to-orange-600", "from-sky-400 to-blue-600", "from-emerald-400 to-green-600", "from-violet-400 to-purple-600", "from-pink-400 to-rose-500", "from-amber-300 to-amber-500"];
+const AVATAR = ["bg-charcoal text-ivory", "border border-border-soft bg-surface-muted text-ink"];
 
 function TopCustomers({ rows, format }: { rows: TopCustomer[] | null; format: (n: number) => string }) {
   const max = Math.max(1, ...(rows ?? []).map((r) => r.sales));
@@ -675,14 +677,14 @@ function TopCustomers({ rows, format }: { rows: TopCustomer[] | null; format: (n
           {rows.map((r, i) => (
             <li key={r.id}>
               <Link href={`/dashboard/customers/${r.id}`} className="group flex items-center gap-3">
-                <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-bold text-white", AVATAR[i % AVATAR.length])}>{initialsOf(r.name)}</span>
+                <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-bold", i === 0 ? AVATAR[0] : AVATAR[1])}>{initialsOf(r.name)}</span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center justify-between gap-2 text-sm">
-                    <span className="truncate font-semibold text-ink group-hover:text-brand-dark">{r.name}</span>
+                    <span className="truncate font-semibold text-ink group-hover:text-ink">{r.name}</span>
                     <span className="shrink-0 font-semibold tabular-nums text-ink"><CountUp value={r.sales} format={format} /></span>
                   </span>
                   <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-surface-muted">
-                    <motion.span className={cn("block h-full rounded-full bg-gradient-to-r", AVATAR[i % AVATAR.length])} initial={{ width: 0 }} animate={{ width: `${(r.sales / max) * 100}%` }} transition={{ duration: 1, delay: 0.2 + i * 0.08, ease: [0.16, 1, 0.3, 1] }} />
+                    <motion.span className={cn("block h-full rounded-full", i === 0 ? "bg-charcoal" : "bg-ink-faint")} initial={{ width: 0 }} animate={{ width: `${(r.sales / max) * 100}%` }} transition={{ duration: 1, delay: 0.2 + i * 0.08, ease: [0.16, 1, 0.3, 1] }} />
                   </span>
                   {r.outstanding > 0 && <span className="mt-0.5 block text-[11px] text-warning">{format(r.outstanding)} still owed</span>}
                 </span>
@@ -704,7 +706,7 @@ function RecentInvoices({ rows, format }: { rows: RecentInvoice[] | null; format
       ) : rows.length === 0 ? (
         <div className="flex flex-col items-center py-10 text-center text-sm text-ink-soft">
           <FileText size={22} className="mb-2" /> No invoices yet.
-          <Link href="/dashboard/invoices/new" className="mt-2 font-semibold text-brand-dark hover:underline">Make your first sale</Link>
+          <Link href="/dashboard/invoices/new" className="mt-2 font-semibold text-ink underline-offset-2 hover:underline">Make your first sale</Link>
         </div>
       ) : (
         <ul className="divide-y divide-border-soft">
@@ -713,7 +715,7 @@ function RecentInvoices({ rows, format }: { rows: RecentInvoice[] | null; format
             return (
               <motion.li key={inv.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.15 + i * 0.05 }}>
                 <Link href={`/dashboard/invoices/${inv.id}`} className="-mx-2 flex items-center gap-3 rounded-2xl px-2 py-3 transition-colors hover:bg-surface-muted">
-                  <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-xs font-bold text-white", AVATAR[i % AVATAR.length])}>{initialsOf(name)}</span>
+                  <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold", AVATAR[1])}>{initialsOf(name)}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-semibold text-ink">{name}</span>
                     <span className="block text-xs text-ink-soft">{inv.invoiceNumber} · {new Date(inv.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>

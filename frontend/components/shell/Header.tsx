@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  Menu, Search, Plus, Bell, ChevronDown, MapPin, Check, Settings, LogOut, UserRound, Users, Building2, AlertTriangle, AlertCircle, Info, Factory, ShoppingBag,
+  Menu, Plus, Bell, ChevronDown, MapPin, Check, Settings, LogOut, UserRound, Users, Building2, AlertTriangle, AlertCircle, Info, Factory, ShoppingBag,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useAlerts } from "@/hooks/useAlerts";
@@ -12,7 +11,6 @@ import { can, ROLE_LABELS } from "@/lib/permissions";
 import { useLocation } from "@/hooks/useLocation";
 import { useCurrency } from "@/hooks/useCurrency";
 import DropdownMenu, { MenuButton, MenuDivider, MenuLabel, MenuLink } from "@/components/ui/DropdownMenu";
-import { buttonClasses } from "@/components/ui/Button";
 import { QUICK_ACTIONS } from "./quickActions";
 import { cn } from "@/lib/utils";
 
@@ -20,71 +18,67 @@ export type { Alert } from "@/hooks/useAlerts";
 
 export default function Header({
   onOpenMenu,
-  onOpenSearch,
   roomy = true,
 }: {
   pathname: string;
   /** False while the full sidebar panel is open (less width for labels). */
   roomy?: boolean;
   onOpenMenu: () => void;
-  onOpenSearch: () => void;
+  /** Kept for callers; search now lives in the sidebar. */
+  onOpenSearch?: () => void;
 }) {
   const { user } = useAuth();
-  const [isMac, setIsMac] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setIsMac(/Mac|iPhone|iPad/.test(navigator.platform)), 0);
-    return () => clearTimeout(t);
-  }, []);
   const canProduce = can(user?.permissions, "inventory", "write");
   const canSell = can(user?.permissions, "sales", "write");
 
   return (
     <header className="sticky top-0 z-30 flex h-[72px] items-center gap-2 bg-ivory/70 px-4 backdrop-blur-xl supports-[backdrop-filter]:bg-ivory/55 sm:gap-3 sm:px-6 lg:px-8">
-      <button onClick={onOpenMenu} className="-ml-1 rounded-xl p-2 text-ink-soft hover:bg-surface hover:text-ink lg:hidden" aria-label="Open menu">
-        <Menu size={20} />
-      </button>
+      {/* Left: menu (phones and tablets). Search lives in the sidebar (and ⌘K / Ctrl K). */}
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <button onClick={onOpenMenu} className="-ml-1 shrink-0 rounded-xl p-2 text-ink-soft hover:bg-surface hover:text-ink lg:hidden" aria-label="Open menu">
+          <Menu size={20} />
+        </button>
+      </div>
 
-      {/* Search */}
-      <button
-        onClick={onOpenSearch}
-        className="hidden h-11 w-full max-w-xs items-center gap-2 rounded-full border border-border-soft bg-surface/80 px-4 text-sm text-ink-faint shadow-card transition-all hover:border-brand/40 hover:shadow-raised md:flex xl:max-w-sm"
-        aria-label="Search"
-      >
-        <Search size={16} />
-        <span className="flex-1 text-left">Search invoices, customers, products…</span>
-        <kbd className="rounded-md border border-border-soft bg-surface-muted px-1.5 text-[11px] text-ink-soft">{isMac ? "⌘K" : "Ctrl K"}</kbd>
-      </button>
-      <button onClick={onOpenSearch} className="rounded-xl p-2 text-ink-soft hover:bg-surface hover:text-ink md:hidden" aria-label="Search">
-        <Search size={20} />
-      </button>
+      {/* Centre: production order · company · sell, as one cluster */}
+      <div className="flex shrink-0 items-center gap-1 rounded-full border border-border-soft bg-surface/85 p-1 shadow-card">
+        {canProduce && (
+          <Link
+            href="/dashboard/production/new"
+            aria-label="New production order"
+            title="New production order"
+            className={cn(
+              "group relative flex h-10 w-10 shrink-0 items-center justify-center gap-2 overflow-hidden whitespace-nowrap rounded-full text-sm font-bold lg:w-36 bg-gradient-to-br from-orange-400 via-orange-500 to-orange-600 text-white shadow-[0_6px_16px_-6px_rgb(240_90_40/0.65)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_22px_-6px_rgb(240_90_40/0.75)]",
+              roomy ? "xl:w-40" : "2xl:w-40"
+            )}
+          >
+            <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-700 group-hover:translate-x-full" aria-hidden="true" />
+            <Factory size={16} className="shrink-0" />
+            <span className="hidden lg:inline">{roomy ? "Production order" : "Production"}</span>
+          </Link>
+        )}
+        <CompanySwitcher roomy={roomy} />
+        {canSell && (
+          <Link
+            href="/dashboard/invoices/new"
+            className={cn(
+              "group relative flex h-10 w-10 shrink-0 items-center justify-center gap-2 overflow-hidden whitespace-nowrap rounded-full text-sm font-extrabold tracking-wide sm:w-auto sm:px-4 lg:w-36 lg:px-0 bg-gradient-to-br from-orange-400 via-orange-500 to-orange-600 text-white shadow-[0_6px_16px_-6px_rgb(240_90_40/0.65)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_22px_-6px_rgb(240_90_40/0.75)]",
+              roomy ? "xl:w-40" : "2xl:w-40"
+            )}
+          >
+            <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-700 group-hover:translate-x-full" aria-hidden="true" />
+            <ShoppingBag size={16} className="shrink-0" />
+            <span className="sr-only sm:not-sr-only">SELL</span>
+          </Link>
+        )}
+      </div>
 
-      <div className="flex-1" />
-
-      {canProduce && (
-        <Link
-          href="/dashboard/production/new"
-          aria-label="New production order"
-          title="New production order"
-          className={cn("hidden h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-border-soft bg-surface/80 px-2.5 text-sm font-semibold text-ink shadow-card transition-all hover:-translate-y-0.5 hover:shadow-raised lg:flex", roomy ? "xl:px-4" : "2xl:px-4")}
-        >
-          <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-violet-400 to-purple-600 text-white"><Factory size={13} /></span>
-          <span className={cn("hidden", roomy ? "xl:inline" : "2xl:inline")}>Production order</span>
-        </Link>
-      )}
-      <CompanySwitcher />
-      {canSell && (
-        <Link
-          href="/dashboard/invoices/new"
-          className="group relative flex h-11 shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-full bg-gradient-to-br from-orange-400 via-orange-500 to-orange-600 px-5 text-sm font-extrabold tracking-wide text-white shadow-[0_8px_20px_-6px_rgb(240_90_40/0.6)] transition-all hover:-translate-y-0.5 hover:shadow-[0_12px_28px_-6px_rgb(240_90_40/0.7)]"
-        >
-          <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/35 to-transparent transition-transform duration-700 group-hover:translate-x-full" aria-hidden="true" />
-          <ShoppingBag size={16} />
-          SELL
-        </Link>
-      )}
-      <QuickCreate />
-      <Notifications />
-      <UserMenu />
+      {/* Right: create, alerts, account */}
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-2 sm:gap-3">
+        <div className="hidden sm:block"><QuickCreate /></div>
+        <Notifications />
+        <UserMenu />
+      </div>
     </header>
   );
 }
@@ -96,7 +90,7 @@ function QuickCreate() {
   return (
     <DropdownMenu
       triggerLabel="Create new"
-      triggerClassName={cn(buttonClasses("primary", "md", "h-11 rounded-full px-3 sm:px-4"), "shadow-card")}
+      triggerClassName="flex h-11 items-center gap-1.5 rounded-full border border-border-soft bg-surface/80 px-3 text-sm font-semibold text-ink shadow-card transition-all hover:-translate-y-0.5 hover:shadow-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand sm:px-4"
       trigger={<><Plus size={16} /><span className="hidden sm:inline">New</span></>}
       width="w-52"
     >
@@ -136,7 +130,7 @@ function Notifications() {
         <>
           <Bell size={19} />
           {urgent > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-bold text-white ring-2 ring-surface">
+            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white ring-2 ring-surface">
               {urgent}
             </span>
           )}
@@ -148,7 +142,7 @@ function Notifications() {
         <>
           <div className="flex items-center justify-between px-3 pb-1 pt-2">
             <p className="text-sm font-semibold text-ink">Needs attention</p>
-            <Link href="/dashboard/notifications" onClick={close} className="text-xs font-medium text-brand-dark hover:underline">View all</Link>
+            <Link href="/dashboard/notifications" onClick={close} className="text-xs font-medium text-ink-soft hover:text-ink hover:underline">View all</Link>
           </div>
           {alerts === null ? (
             <p className="px-3 py-6 text-center text-sm text-ink-soft">Checking…</p>
@@ -179,7 +173,7 @@ function Notifications() {
 }
 
 /** The company (bold) and the branch whose data is shown, switchable when there are several. */
-function CompanySwitcher() {
+function CompanySwitcher({ roomy = true }: { roomy?: boolean }) {
   const { user } = useAuth();
   const { locations, activeLocationId, activeLocation, setActiveLocation } = useLocation();
   const branch = activeLocationId === "all" ? (locations.length > 1 ? "All branches" : locations[0]?.name ?? "Main branch") : activeLocation?.name ?? "Select branch";
@@ -189,20 +183,23 @@ function CompanySwitcher() {
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-zinc-700 to-zinc-900 text-[11px] font-bold text-white">
         {company.split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase()}
       </span>
-      <span className="hidden min-w-0 text-left leading-tight sm:block">
-        <span className="block max-w-[11rem] truncate text-sm font-bold text-ink">{company}</span>
-        <span className="flex items-center gap-1 text-xs text-ink-soft"><MapPin size={11} className="text-brand" /><span className="max-w-[9rem] truncate">{branch}</span></span>
+      <span className="hidden min-w-0 flex-1 text-left leading-tight sm:block">
+        <span className="block truncate text-sm font-bold text-ink">{company}</span>
+        <span className="flex items-center gap-1 text-xs text-ink-soft"><MapPin size={11} className="shrink-0" /><span className="truncate">{branch}</span></span>
       </span>
       {locations.length > 1 && <ChevronDown size={15} className="hidden text-ink-faint sm:block" />}
     </>
   );
-  const cls = "flex h-11 items-center gap-2.5 rounded-full border border-border-soft bg-surface/80 py-1 pl-1.5 pr-1.5 shadow-card transition-all sm:pr-4";
+  const cls = cn(
+    "flex h-10 items-center gap-2.5 rounded-full py-1 pl-1 pr-1 sm:w-56 sm:pr-4 lg:w-64",
+    roomy ? "xl:w-80" : "2xl:w-80"
+  );
   if (locations.length <= 1) return <div className={cls}>{content}</div>;
 
   return (
     <DropdownMenu
       triggerLabel={`${company}, ${branch}`}
-      triggerClassName={cn(cls, "hover:-translate-y-0.5 hover:shadow-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand")}
+      triggerClassName={cn(cls, "transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand")}
       trigger={content}
       width="w-64"
     >
@@ -211,7 +208,7 @@ function CompanySwitcher() {
           <MenuLabel>Show data for</MenuLabel>
           <MenuButton onClick={() => { setActiveLocation("all"); close(); window.location.reload(); }}>
             <Building2 size={15} /> <span className="flex-1">All branches</span>
-            {activeLocationId === "all" && <Check size={15} className="!text-brand" />}
+            {activeLocationId === "all" && <Check size={15} className="!text-ink" />}
           </MenuButton>
           {locations.map((l) => (
             <MenuButton key={l.id} onClick={() => { setActiveLocation(l.id); close(); }}>
@@ -220,7 +217,7 @@ function CompanySwitcher() {
                 <span className="block truncate">{l.name}</span>
                 {l.city && <span className="block text-xs text-ink-soft">{l.city}</span>}
               </span>
-              {activeLocationId === l.id && <Check size={15} className="!text-brand" />}
+              {activeLocationId === l.id && <Check size={15} className="!text-ink" />}
             </MenuButton>
           ))}
           {user?.role === "admin" && (
@@ -250,7 +247,7 @@ function UserMenu() {
           <div className="px-3 pb-2 pt-2">
             <p className="truncate text-sm font-semibold text-ink">{user?.firstName} {user?.lastName}</p>
             <p className="truncate text-xs text-ink-soft">{user?.email}</p>
-            {user?.role && <p className="mt-0.5 text-xs font-medium text-brand-dark">{ROLE_LABELS[user.role] ?? user.role}</p>}
+            {user?.role && <p className="mt-0.5 text-xs font-medium text-ink-soft">{ROLE_LABELS[user.role] ?? user.role}</p>}
           </div>
           <MenuDivider />
           <MenuLink href="/dashboard/profile" onSelect={close}><UserRound size={15} /> Your profile</MenuLink>
