@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import Skeleton from "@/components/ui/Skeleton";
@@ -41,7 +42,7 @@ export default function StockMovementsPage() {
     let active = true;
     apiFetch<{ success: boolean; data: StockMovement[] }>("/stock")
       .then((res) => { if (active) setMovements(res.data); })
-      .catch(console.error)
+      .catch((e: unknown) => reportError(e, "Could not load this page"))
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [version]);

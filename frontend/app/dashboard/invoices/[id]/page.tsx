@@ -6,6 +6,7 @@ import Dialog from "@/components/ui/Dialog";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
@@ -129,7 +130,7 @@ export default function InvoiceDetailPage() {
         setInvoice(invRes.data);
         setBusiness(bizRes.data);
       })
-      .catch(console.error)
+      .catch((e: unknown) => reportError(e, "Could not load this page"))
       .finally(() => {
         if (active) setLoading(false);
       });

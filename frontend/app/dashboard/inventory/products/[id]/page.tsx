@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import Skeleton from "@/components/ui/Skeleton";
@@ -90,7 +91,7 @@ export default function ProductDetailPage() {
     let active = true;
     fetchAll()
       .then((r) => { if (active) apply(r); })
-      .catch(console.error)
+      .catch((e: unknown) => reportError(e, "Could not load this page"))
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [fetchAll, apply, version]);

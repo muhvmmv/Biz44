@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import Link from "next/link";
 import PageHeader from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
@@ -28,7 +29,7 @@ export default function ReceivablePage() {
     let active = true;
     apiFetch<{ success: boolean; data: ARData }>("/accounting/receivable")
       .then((res) => { if (active) setData(res.data); })
-      .catch(console.error)
+      .catch((e: unknown) => reportError(e, "Could not load this page"))
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [version]);

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { reportError, confirmAction } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
@@ -60,19 +61,19 @@ export default function LeavePage() {
       setShowForm(false);
       setForm({ employeeId: "", type: "annual", startDate: "", endDate: "", reason: "" });
       load();
-    } catch (err) { console.error(err); }
+    } catch (err) { reportError(err); }
     finally { setSubmitting(false); }
   };
 
   const updateStatus = async (id: string, status: string) => {
     try { await apiFetch(`/leave/${id}`, { method: "PUT", body: JSON.stringify({ status }) }); load(); }
-    catch (err) { console.error(err); }
+    catch (err) { reportError(err); }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this leave request?")) return;
+    if (!(await confirmAction({ title: "Delete this leave request?", danger: true }))) return;
     try { await apiFetch(`/leave/${id}`, { method: "DELETE" }); load(); }
-    catch (err) { console.error(err); }
+    catch (err) { reportError(err); }
   };
 
   return (

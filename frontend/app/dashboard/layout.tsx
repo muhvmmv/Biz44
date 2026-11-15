@@ -14,6 +14,7 @@ import { can } from "@/lib/permissions";
 import { Card } from "@/components/ui/Card";
 import EmptyState from "@/components/ui/EmptyState";
 import { ButtonLink } from "@/components/ui/Button";
+import { FeedbackProvider } from "@/components/ui/Feedback";
 
 const COLLAPSED_KEY = "biz44_sidebar_collapsed";
 
@@ -21,7 +22,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <ProtectedRoute>
       <LocationProvider>
-        <AppShell>{children}</AppShell>
+        <FeedbackProvider>
+          <AppShell>{children}</AppShell>
+        </FeedbackProvider>
       </LocationProvider>
     </ProtectedRoute>
   );

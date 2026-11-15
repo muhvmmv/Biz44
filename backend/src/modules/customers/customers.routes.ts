@@ -115,6 +115,8 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
 
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const used = await prisma.invoice.count({ where: { customerId: req.params.id, companyId: req.user!.companyId } });
+    if (used > 0) throw badRequest('This customer has invoices on record, so they cannot be deleted. Their history is kept.');
     await customerService.delete(req.params.id, req.user!.companyId);
     res.json({ success: true });
   } catch (err) { next(err); }

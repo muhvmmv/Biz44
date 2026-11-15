@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Wallet, Landmark, Plus, ArrowLeftRight, Pencil, HandCoins, ChevronRight } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Skeleton from "@/components/ui/Skeleton";
@@ -76,7 +77,7 @@ export default function CashAndBanksPage() {
         setAccounts(a.data);
         setChart(c.data);
       })
-      .catch(console.error);
+      .catch((e: unknown) => reportError(e, "Could not load this page"));
     return () => { active = false; };
   }, [fetchAccounts]);
 
@@ -84,7 +85,7 @@ export default function CashAndBanksPage() {
     let active = true;
     apiFetch<{ success: boolean; data: CashFlow }>(`/accounting/cash-flow${periodQuery(period)}`)
       .then((r) => { if (active) setFlow(r.data); })
-      .catch(console.error);
+      .catch((e: unknown) => reportError(e, "Could not load this page"));
     return () => { active = false; };
   }, [period, accounts]);
 

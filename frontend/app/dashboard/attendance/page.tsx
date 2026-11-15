@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { reportError, confirmAction } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
@@ -64,14 +65,14 @@ export default function AttendancePage() {
       setShowForm(false);
       setForm({ ...form, notes: "" });
       load();
-    } catch (err) { console.error(err); }
+    } catch (err) { reportError(err); }
     finally { setSubmitting(false); }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this record?")) return;
+    if (!(await confirmAction({ title: "Delete this record?", danger: true }))) return;
     try { await apiFetch(`/attendance/${id}`, { method: "DELETE" }); load(); }
-    catch (err) { console.error(err); }
+    catch (err) { reportError(err); }
   };
 
   return (

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import PaymentAccountSelect from "@/components/ui/PaymentAccountSelect";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
@@ -48,7 +49,7 @@ export default function ExpensesPage() {
         setCategories(r.data);
         setForm((f) => (f.category === "General Expense" || !f.category ? { ...f, category: r.data[0]?.id ?? "" } : f));
       })
-      .catch(console.error);
+      .catch((e: unknown) => reportError(e, "Could not load this page"));
   }, []);
   const [submitting, setSubmitting] = useState(false);
   useOpenOnQuery("new", () => setShowForm(true));
@@ -66,7 +67,7 @@ export default function ExpensesPage() {
       .then((res) => {
         if (active) setExpenses(res.data);
       })
-      .catch(console.error)
+      .catch((e: unknown) => reportError(e, "Could not load this page"))
       .finally(() => {
         if (active) setLoading(false);
       });

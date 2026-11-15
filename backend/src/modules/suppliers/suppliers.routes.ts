@@ -88,8 +88,31 @@ const WRITABLE = ['name', 'email', 'phone', 'address'] as const;
 
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const rows = await supplierService.findMany(req.user!.companyId, { orderBy: { name: 'asc' } });
-    res.json({ success: true, data: rows });
+    const companyId = req.user!.companyId;
+    const [rows, purchases] = await Promise.all([
+      supplierService.findMany(companyId, { orderBy: { name: 'asc' } }),
+      prisma.purchase.findMany({
+        where: { companyId, supplierId: { not: null } },
+        select: { supplierId: true, total: true, amountPaid: true, returnedAmount: true, dueDate: true },
+      }),
+    ]);
+    // What is owed to each supplier, and how much of it is past due.
+    const now = new Date();
+    const owed = new Map<string, { owed: number; overdue: number }>();
+    for (const p of purchases) {
+      const balance = purchaseBalance(p);
+      if (balance <= 0.009) continue;
+      const o = owed.get(p.supplierId!) ?? { owed: 0, overdue: 0 };
+      o.owed += balance;
+      if (p.dueDate && p.dueDate < now) o.overdue += balance;
+      owed.set(p.supplierId!, o);
+    }
+    const data = (rows as any[]).map((r) => ({
+      ...r,
+      owed: Math.round((owed.get(r.id)?.owed ?? 0) * 100) / 100,
+      overdue: Math.round((owed.get(r.id)?.overdue ?? 0) * 100) / 100,
+    }));
+    res.json({ success: true, data });
   } catch (err) { next(err); }
 });
 
@@ -118,6 +141,9 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
 
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const used = await prisma.purchase.count({ where: { supplierId: req.params.id, companyId: req.user!.companyId } })
+      + await prisma.inventoryBatch.count({ where: { supplierId: req.params.id, companyId: req.user!.companyId } });
+    if (used > 0) throw badRequest('This supplier has deliveries on record, so it cannot be deleted. Its history is kept.');
     await supplierService.delete(req.params.id, req.user!.companyId);
     res.json({ success: true });
   } catch (err) { next(err); }

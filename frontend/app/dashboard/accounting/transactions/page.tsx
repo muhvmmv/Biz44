@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import Skeleton from "@/components/ui/Skeleton";
@@ -36,7 +37,7 @@ export default function TransactionsPage() {
     const url = filter ? `/accounting/transactions?type=${filter}` : "/accounting/transactions";
     apiFetch<{ success: boolean; data: Transaction[] }>(url)
       .then((res) => { if (active) setTransactions(res.data); })
-      .catch(console.error)
+      .catch((e: unknown) => reportError(e, "Could not load this page"))
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [filter, version]);

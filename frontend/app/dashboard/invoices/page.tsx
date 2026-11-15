@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import Link from "next/link";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -37,7 +38,7 @@ export default function InvoicesPage() {
     let active = true;
     apiFetch<{ success: boolean; data: Invoice[] }>("/invoices")
       .then((res) => { if (active) setInvoices(res.data); })
-      .catch(console.error)
+      .catch((e: unknown) => reportError(e, "Could not load this page"))
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [version]);

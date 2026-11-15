@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import PageHeader from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
 import Skeleton from "@/components/ui/Skeleton";
@@ -37,7 +38,7 @@ export default function PayablePage() {
     let active = true;
     apiFetch<{ success: boolean; data: APData }>("/accounting/payable")
       .then((r) => { if (active) setData(r.data); })
-      .catch(console.error);
+      .catch((e: unknown) => reportError(e, "Could not load this page"));
     return () => { active = false; };
   }, [version]);
 

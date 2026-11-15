@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import PaymentAccountSelect from "@/components/ui/PaymentAccountSelect";
 import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
 import { useRouter } from "next/navigation";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -63,7 +64,7 @@ export default function ReceiveInventoryPage() {
         setProducts(pRes.data);
         setSuppliers(sRes.data);
       })
-      .catch(console.error);
+      .catch((e: unknown) => reportError(e, "Could not load this page"));
   }, []);
 
   const addLine = () =>

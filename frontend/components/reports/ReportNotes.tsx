@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { confirmAction, reportError } from "@/components/ui/Feedback";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -49,7 +50,7 @@ export default function ReportNotes() {
     const url = filter ? `/report-notes?category=${filter}` : "/report-notes";
     apiFetch<{ success: boolean; data: Note[] }>(url)
       .then((res) => { if (active) setNotes(res.data); })
-      .catch(console.error)
+      .catch((e: unknown) => reportError(e, "Could not load notes"))
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [filter]);
@@ -102,11 +103,11 @@ export default function ReportNotes() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this note?")) return;
+    if (!(await confirmAction({ title: "Delete this note?", danger: true }))) return;
     try {
       await apiFetch(`/report-notes/${id}`, { method: "DELETE" });
       load();
-    } catch (err) { console.error(err); }
+    } catch (err) { reportError(err); }
   };
 
   const variantFor = (cat: string) =>
