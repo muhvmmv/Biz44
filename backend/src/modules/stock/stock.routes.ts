@@ -2,7 +2,8 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { resolveLocation, locationWhere, requireTargetLocation } from '../../middleware/locationAuth';
 import { prisma } from '../../lib/prisma';
-import { badRequest, notFound } from '../../lib/errors';
+import { AppError, badRequest, notFound } from '../../lib/errors';
+import { can } from '../../lib/permissions';
 import { resolvePaymentAccount, parsePositiveAmount, parsePositiveQuantity, parseQuantity, roundQty } from '../../lib/accounts';
 import { postJournal, systemAccount } from '../../lib/ledger';
 import {
@@ -156,6 +157,9 @@ router.post('/receive', resolveLocation, async (req: Request, res: Response, nex
     const paymentStatus =
       outstanding <= 0.01 ? 'paid' : paidAmount > 0 ? 'partially_paid' : 'unpaid';
 
+    if (paidAmount > 0 && !can(req.user!.role, 'money', 'write')) {
+      throw new AppError(403, 'Your role can receive goods on credit only. Ask an accountant to record the payment.');
+    }
     // Validate the payment account before writing anything.
     const payFromAccount = paidAmount > 0
       ? await resolvePaymentAccount(prisma, companyId, { accountId: paymentAccountId, account: paymentAccount })

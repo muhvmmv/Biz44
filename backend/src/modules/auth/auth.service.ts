@@ -5,6 +5,7 @@ import { DEFAULT_ACCOUNT_KEYS, SYSTEM_ACCOUNTS } from '../../lib/ledger';
 
 import { prisma } from '../../lib/prisma';
 import { badRequest } from '../../lib/errors';
+import { permissionsFor } from '../../lib/permissions';
 
 export interface RegisterInput {
   firstName: string;
@@ -86,14 +87,16 @@ export class AuthService {
   }
 
   async login(data: LoginInput) {
-    const user = await prisma.user.findUnique({
-      where: { email: data.email },
+    const email = typeof data.email === 'string' ? data.email.trim() : '';
+    const user = await prisma.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
       include: { company: true },
     });
     if (!user) throw new Error('Invalid email or password');
 
     const valid = await bcrypt.compare(data.password, user.password);
     if (!valid) throw new Error('Invalid email or password');
+    if (!user.isActive) throw new Error('This account has been deactivated. Ask your administrator.');
 
     // Safety net: if the user somehow has no location access yet, grant them
     // access to the company's default location.
@@ -176,6 +179,7 @@ export class AuthService {
       companyId: user.companyId,
       businessType: user.company?.businessType ?? null,
       currency: user.company?.currency ?? 'USD',
+      permissions: permissionsFor(user.role),
     };
   }
 }

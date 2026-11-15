@@ -6,6 +6,8 @@ import { Search, CornerDownLeft, FileText, Users, Truck, Package, Plus, ArrowRig
 import { apiFetch } from "@/lib/api";
 import { allPages } from "@/lib/navigation";
 import { QUICK_ACTIONS } from "./quickActions";
+import { useAuth } from "@/hooks/useAuth";
+import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
 interface Result {
@@ -33,6 +35,7 @@ const norm = (s: string) => s.toLowerCase().normalize("NFKD");
  */
 export default function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const router = useRouter();
+  const { user } = useAuth();
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const [data, setData] = useState<Data | null>(null);
@@ -68,10 +71,10 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
       !q || fields.some((f) => f && norm(f).split(/[\s›&/-]+/).some((w) => w.startsWith(q)));
     const out: Result[] = [];
 
-    QUICK_ACTIONS.filter((a) => wordMatch(a.label, ...(a.keywords ?? []))).forEach((a) =>
+    QUICK_ACTIONS.filter((a) => can(user?.permissions, a.area, "write") && wordMatch(a.label, ...(a.keywords ?? []))).forEach((a) =>
       out.push({ id: `action:${a.href}`, group: "Actions", label: a.label, href: a.href, icon: <Plus size={16} /> })
     );
-    allPages()
+    allPages(user?.permissions)
       .filter((p) => wordMatch(p.leaf?.name ?? p.item.name, p.item.name, ...(p.leaf?.keywords ?? p.item.keywords ?? [])))
       .slice(0, q ? 8 : 6)
       .forEach((p) =>
@@ -112,7 +115,7 @@ export default function CommandPalette({ open, onClose }: { open: boolean; onClo
         .forEach((p) => out.push({ id: `pro:${p.id}`, group: "Products", label: p.name, hint: p.sku ?? undefined, href: `/dashboard/inventory/products/${p.id}`, icon: <Package size={16} /> }));
     }
     return out;
-  }, [query, data]);
+  }, [query, data, user?.permissions]);
 
   const go = (r: Result | undefined) => {
     if (!r) return;

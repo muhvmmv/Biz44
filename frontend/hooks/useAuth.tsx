@@ -1,5 +1,6 @@
 "use client";
 
+import type { Permissions } from "@/lib/permissions";
 import {
   createContext, useContext, useState, useEffect, useCallback, ReactNode,
 } from "react";
@@ -14,6 +15,7 @@ interface User {
   companyId: string;
   businessType?: string | null;
   currency?: string;
+  permissions?: Permissions;
 }
 
 interface AuthContextType {

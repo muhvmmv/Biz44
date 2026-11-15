@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { ChevronDown, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
-import { NAV, NavItem, matchNav } from "@/lib/navigation";
+import { NavItem, matchNav, visibleNav } from "@/lib/navigation";
+import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
 interface SidebarProps {
@@ -22,6 +23,8 @@ export default function Sidebar({ pathname, collapsed, onToggleCollapsed, mobile
   const active = matchNav(pathname);
   // The group holding the current page is open unless the user closed it;
   // other groups are closed unless the user opened them.
+  const { user } = useAuth();
+  const nav = visibleNav(user?.permissions);
   const [opened, setOpened] = useState<Set<string>>(() => new Set());
   const [closed, setClosed] = useState<Set<string>>(() => new Set());
   const isOpen = (name: string) => (active?.item.name === name ? !closed.has(name) : opened.has(name));
@@ -73,7 +76,7 @@ export default function Sidebar({ pathname, collapsed, onToggleCollapsed, mobile
 
         {/* Navigation */}
         <nav className={cn("flex-1 overflow-y-auto py-4", rail ? "px-2" : "px-3")}>
-          {NAV.map((section, si) => (
+          {nav.map((section, si) => (
             <div key={section.label} className={cn(si > 0 && "mt-5")}>
               {rail ? (
                 si > 0 && <div className="mx-3 mb-3 h-px bg-border-soft" aria-hidden="true" />

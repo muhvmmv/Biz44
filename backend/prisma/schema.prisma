@@ -15,7 +15,10 @@ model User {
   password       String
   companyId      String
   company        Company              @relation(fields: [companyId], references: [id])
+  /// admin, manager, accountant, storekeeper or sales (see src/lib/permissions.ts)
   role           String               @default("admin")
+  /// Deactivated users cannot sign in; their history is kept.
+  isActive       Boolean              @default(true)
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
   locationAccess UserLocationAccess[]

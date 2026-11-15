@@ -3,11 +3,12 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  Menu, Search, Plus, Bell, ChevronRight, MapPin, Check, Settings, LogOut, UserRound, Building2, AlertTriangle, AlertCircle, Info,
+  Menu, Search, Plus, Bell, ChevronRight, MapPin, Check, Settings, LogOut, UserRound, Users, Building2, AlertTriangle, AlertCircle, Info,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { breadcrumbs } from "@/lib/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { can, ROLE_LABELS } from "@/lib/permissions";
 import { useLocation } from "@/hooks/useLocation";
 import { useCurrency } from "@/hooks/useCurrency";
 import DropdownMenu, { MenuButton, MenuDivider, MenuLabel, MenuLink } from "@/components/ui/DropdownMenu";
@@ -91,6 +92,9 @@ export default function Header({
 }
 
 function QuickCreate() {
+  const { user } = useAuth();
+  const actions = QUICK_ACTIONS.filter((a) => can(user?.permissions, a.area, "write"));
+  if (actions.length === 0) return null;
   return (
     <DropdownMenu
       triggerLabel="Create new"
@@ -101,7 +105,7 @@ function QuickCreate() {
       {(close) => (
         <>
           <MenuLabel>Create</MenuLabel>
-          {QUICK_ACTIONS.map((a) => (
+          {actions.map((a) => (
             <MenuLink key={a.href} href={a.href} onSelect={close}>
               <Plus size={15} /> {a.label}
             </MenuLink>
@@ -238,11 +242,13 @@ function UserMenu() {
           <div className="px-3 pb-2 pt-2">
             <p className="truncate text-sm font-semibold text-ink">{user?.firstName} {user?.lastName}</p>
             <p className="truncate text-xs text-ink-soft">{user?.email}</p>
+            {user?.role && <p className="mt-0.5 text-xs font-medium text-brand-dark">{ROLE_LABELS[user.role] ?? user.role}</p>}
           </div>
           <MenuDivider />
           <MenuLink href="/dashboard/profile" onSelect={close}><UserRound size={15} /> Your profile</MenuLink>
-          <MenuLink href="/dashboard/settings" onSelect={close}><Settings size={15} /> Company settings</MenuLink>
-          <MenuLink href="/dashboard/settings/locations" onSelect={close}><MapPin size={15} /> Locations</MenuLink>
+          {user?.role === "admin" && <MenuLink href="/dashboard/settings" onSelect={close}><Settings size={15} /> Company settings</MenuLink>}
+          {user?.role === "admin" && <MenuLink href="/dashboard/settings/team" onSelect={close}><Users size={15} /> Team</MenuLink>}
+          {user?.role === "admin" && <MenuLink href="/dashboard/settings/locations" onSelect={close}><MapPin size={15} /> Locations</MenuLink>}
           <MenuDivider />
           <MenuButton onClick={() => { close(); logout(); }} danger><LogOut size={15} /> Sign out</MenuButton>
         </>

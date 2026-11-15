@@ -7,6 +7,13 @@ import { LocationProvider, useLocation } from "@/hooks/useLocation";
 import Sidebar from "@/components/shell/Sidebar";
 import Header from "@/components/shell/Header";
 import CommandPalette from "@/components/shell/CommandPalette";
+import { Lock } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+import { pageAccess } from "@/lib/navigation";
+import { can } from "@/lib/permissions";
+import { Card } from "@/components/ui/Card";
+import EmptyState from "@/components/ui/EmptyState";
+import { ButtonLink } from "@/components/ui/Button";
 
 const COLLAPSED_KEY = "biz44_sidebar_collapsed";
 
@@ -24,6 +31,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { loading: locationLoading } = useLocation();
+  const { user } = useAuth();
+  const access = pageAccess(pathname);
+  const allowed = !access || !user || can(user.permissions, access.area, access.need);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   // This component only mounts in the browser (after sign-in), so reading
@@ -83,7 +93,18 @@ function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Header pathname={pathname} onOpenMenu={() => setMobileOpen(true)} onOpenSearch={() => setPaletteOpen(true)} />
         <main id="main" className="flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</div>
+          <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+            {allowed ? children : (
+              <Card>
+                <EmptyState
+                  icon={<Lock size={22} />}
+                  title="This page isn't available for your role"
+                  description="Your role does not allow this. Ask an administrator if you need access."
+                  action={<ButtonLink href="/dashboard" variant="outline">Go to dashboard</ButtonLink>}
+                />
+              </Card>
+            )}
+          </div>
         </main>
       </div>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
