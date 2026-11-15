@@ -128,7 +128,7 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
     }
 
     // Guard 2: cannot delete if any records reference this location
-    const [invoices, payments, transactions, movements, purchases, batches, attendance, leaves, payrolls, journal, productionOrders] =
+    const [invoices, payments, transactions, movements, purchases, batches, attendance, leaves, payrolls, journal, productionOrders, transfers] =
       await Promise.all([
         prisma.invoice.count({ where: { locationId: location.id } }),
         prisma.payment.count({ where: { locationId: location.id } }),
@@ -141,11 +141,12 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
         prisma.payroll.count({ where: { locationId: location.id } }),
         prisma.journalEntry.count({ where: { locationId: location.id } }),
         prisma.productionOrder.count({ where: { locationId: location.id } }),
+        prisma.stockTransfer.count({ where: { OR: [{ fromLocationId: location.id }, { toLocationId: location.id }] } }),
       ]);
 
     const totalRefs =
       invoices + payments + transactions + movements + purchases +
-      batches + attendance + leaves + payrolls + journal + productionOrders;
+      batches + attendance + leaves + payrolls + journal + productionOrders + transfers;
 
     if (totalRefs > 0) {
       return res.status(400).json({

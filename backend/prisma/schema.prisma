@@ -68,6 +68,7 @@ model Company {
   vatNumber           String?
   teamSize            String?
   onboardingCompleted Boolean           @default(false)
+  stockTransfers      StockTransfer[]
 }
 
 model Customer {
@@ -148,6 +149,8 @@ model Product {
   productionMaterials ProductionMaterial[]
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
+
+  transferLines StockTransferLine[]
 
   @@map("products")
 }
@@ -506,6 +509,9 @@ model Location {
   journalEntries   JournalEntry[]
   productionOrders ProductionOrder[]
 
+  transfersOut StockTransfer[] @relation("TransferFrom")
+  transfersIn  StockTransfer[] @relation("TransferTo")
+
   @@index([companyId, status])
   @@map("locations")
 }
@@ -644,4 +650,39 @@ model ProductionIssue {
 
   @@index([materialId])
   @@map("production_issues")
+}
+
+/// Stock moved from one location to another. Batches keep their cost,
+/// received date and source, so the company's stock value does not change.
+model StockTransfer {
+  id             String              @id @default(uuid())
+  companyId      String
+  company        Company             @relation(fields: [companyId], references: [id])
+  /// TR-0001, TR-0002, … per company
+  number         String
+  fromLocationId String
+  fromLocation   Location            @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  toLocationId   String
+  toLocation     Location            @relation("TransferTo", fields: [toLocationId], references: [id])
+  notes          String?
+  createdById    String?
+  createdAt      DateTime            @default(now())
+  lines          StockTransferLine[]
+
+  @@unique([companyId, number])
+  @@index([companyId, createdAt])
+  @@map("stock_transfers")
+}
+
+model StockTransferLine {
+  id         String        @id @default(uuid())
+  transferId String
+  transfer   StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product       @relation(fields: [productId], references: [id])
+  quantity   Float
+  /// Cost of the batches moved (unchanged by the move).
+  totalCost  Float         @default(0)
+
+  @@map("stock_transfer_lines")
 }

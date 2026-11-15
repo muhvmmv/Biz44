@@ -138,6 +138,8 @@ export async function addStock(
     productionOrderId?: string | null;
     sellingPriceSnapshot?: number;
     batchReference?: string | null;
+    /** Keep a batch's original date when it moves location, so FIFO order holds. */
+    receivedAt?: Date;
   } & MovementInfo
 ) {
   const quantity = roundQty(args.quantity);
@@ -156,6 +158,7 @@ export async function addStock(
       unitCost: args.unitCost,
       sellingPriceSnapshot: args.sellingPriceSnapshot ?? 0,
       reference: args.batchReference ?? args.reference ?? null,
+      ...(args.receivedAt && { receivedAt: args.receivedAt }),
     },
   });
   const totalCost = round2(quantity * args.unitCost);

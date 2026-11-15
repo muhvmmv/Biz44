@@ -34,6 +34,14 @@ console.log(`Migrating ${dbName}...`);
 const migrate = spawnSync(npx, ['prisma', 'migrate', 'deploy'], { cwd: backend, env, stdio: 'inherit' });
 if (migrate.status !== 0) process.exit(migrate.status ?? 1);
 
+// A server left on the port (e.g. from an interrupted run) would answer
+// instead of the one started here.
+try {
+  await fetch(`${apiUrl}/health`);
+  console.error(`Port ${port} is already in use. Stop whatever is running there, or set TEST_PORT.`);
+  process.exit(2);
+} catch { /* free */ }
+
 console.log(`Starting the API on port ${port}...`);
 const server = spawn(npx, ['ts-node-dev', '--transpile-only', 'src/index.ts'], {
   cwd: backend,
@@ -45,12 +53,21 @@ const server = spawn(npx, ['ts-node-dev', '--transpile-only', 'src/index.ts'], {
     CORS_ORIGIN: 'http://localhost:3100',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
+  // Own process group, so stopping it also stops the node process npx started.
+  detached: process.platform !== 'win32',
 });
 let serverLog = '';
 server.stdout.on('data', (d) => { serverLog += d; });
 server.stderr.on('data', (d) => { serverLog += d; });
 
-const stop = () => { if (!server.killed) server.kill('SIGTERM'); };
+const stop = () => {
+  if (server.exitCode !== null) return;
+  try {
+    if (process.platform !== 'win32') process.kill(-server.pid, 'SIGTERM');
+    else server.kill('SIGTERM');
+  } catch { /* already gone */ }
+};
+process.on('exit', stop);
 process.on('SIGINT', () => { stop(); process.exit(130); });
 
 async function waitForApi() {

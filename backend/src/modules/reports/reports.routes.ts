@@ -235,6 +235,7 @@ const MOVEMENT_GROUPS: Record<string, string> = {
   production_issue: 'usedInProduction', production_return: 'usedInProduction',
   sale: 'sold', return: 'sold',
   supplier_return: 'returnedToSupplier',
+  transfer_in: 'transferred', transfer_out: 'transferred',
   adjustment: 'adjusted', count: 'adjusted', damage: 'adjusted',
 };
 
@@ -253,8 +254,8 @@ router.get('/stock-movement', resolveLocation, async (req, res, next) => {
         select: { productId: true, type: true, quantity: true, totalCost: true, createdAt: true },
       }),
     ]);
-    type Groups = Record<'received' | 'produced' | 'usedInProduction' | 'sold' | 'returnedToSupplier' | 'adjusted', number>;
-    const blank = (): Groups => ({ received: 0, produced: 0, usedInProduction: 0, sold: 0, returnedToSupplier: 0, adjusted: 0 });
+    type Groups = Record<'received' | 'produced' | 'usedInProduction' | 'sold' | 'returnedToSupplier' | 'transferred' | 'adjusted', number>;
+    const blank = (): Groups => ({ received: 0, produced: 0, usedInProduction: 0, sold: 0, returnedToSupplier: 0, transferred: 0, adjusted: 0 });
     const per = new Map<string, { inPeriod: Groups; value: Groups; after: number }>();
     for (const m of movements) {
       const row = per.get(m.productId) ?? { inPeriod: blank(), value: blank(), after: 0 };
@@ -277,7 +278,7 @@ router.get('/stock-movement', resolveLocation, async (req, res, next) => {
         const values = Object.fromEntries(Object.entries(row.value).map(([k, v]) => [k, round2(v)])) as Groups;
         return { productId: p.id, name: p.name, unit: p.unit, itemType: p.itemType, opening: q(closing - net), ...groups, values, closing };
       })
-      .filter((r) => r.opening !== 0 || r.closing !== 0 || Object.values(r.values).some((v) => v !== 0) || r.received || r.sold || r.produced || r.usedInProduction || r.adjusted || r.returnedToSupplier);
+      .filter((r) => r.opening !== 0 || r.closing !== 0 || Object.values(r.values).some((v) => v !== 0) || r.received || r.sold || r.produced || r.usedInProduction || r.adjusted || r.returnedToSupplier || r.transferred);
     res.json({ success: true, data });
   } catch (err) { next(err); }
 });

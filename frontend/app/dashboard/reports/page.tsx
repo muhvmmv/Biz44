@@ -253,7 +253,7 @@ function Production({ query }: { query: string }) {
 
 interface StockRow {
   productId: string; name: string; unit: string; itemType: string;
-  opening: number; received: number; produced: number; usedInProduction: number; sold: number; returnedToSupplier: number; adjusted: number; closing: number;
+  opening: number; received: number; produced: number; usedInProduction: number; sold: number; returnedToSupplier: number; transferred: number; adjusted: number; closing: number;
 }
 
 function StockMovement({ query }: { query: string }) {
@@ -291,6 +291,7 @@ function StockMovement({ query }: { query: string }) {
                     <th className={`${th} text-right`}>Used in production</th>
                     <th className={`${th} text-right`}>Sold</th>
                     <th className={`${th} text-right`}>Returned to supplier</th>
+                    <th className={`${th} text-right`}>Transferred</th>
                     <th className={`${th} text-right`}>Adjusted</th>
                     <th className={`${th} text-right`}>Closing</th>
                   </tr>
@@ -305,6 +306,7 @@ function StockMovement({ query }: { query: string }) {
                       <td className={`${td} text-right`}>{cell(r.usedInProduction, r.unit)}</td>
                       <td className={`${td} text-right`}>{cell(r.sold, r.unit)}</td>
                       <td className={`${td} text-right`}>{cell(r.returnedToSupplier, r.unit)}</td>
+                      <td className={`${td} text-right`}>{cell(r.transferred, r.unit)}</td>
                       <td className={`${td} text-right`}>{cell(r.adjusted, r.unit)}</td>
                       <td className={`${td} text-right font-semibold`}>{formatQty(r.closing, r.unit)}</td>
                     </tr>
@@ -315,7 +317,7 @@ function StockMovement({ query }: { query: string }) {
           )}
         </CardContent>
       </Card>
-      <p className="text-xs text-ink-soft">Sold is net of customer returns; adjusted includes counts and write-offs. Closing stock matches the stock batches.</p>
+      <p className="text-xs text-ink-soft">Sold is net of customer returns; transferred is stock moved in or out of the selected location; adjusted includes counts and write-offs. Closing stock matches the stock batches.</p>
     </div>
   );
 }

@@ -24,6 +24,7 @@ import purchaseRoutes from './modules/purchases/purchases.routes';
 import locationRoutes from './modules/locations/locations.routes';
 import productionRoutes from './modules/production/production.routes';
 import userRoutes from './modules/users/users.routes';
+import transferRoutes from './modules/transfers/transfers.routes';
 import { authorize } from './middleware/auth';
 
 const app = express(); 
@@ -43,6 +44,7 @@ app.use('/api/stock', ...authorize('inventory', [
   { path: /^\/(receive|supplier-return)$/, methods: ['POST'], areas: ['purchasing'] },
 ]), stockRoutes);
 app.use('/api/production', ...authorize('inventory'), productionRoutes);
+app.use('/api/stock-transfers', ...authorize('inventory'), transferRoutes);
 app.use('/api/payments', ...authorize('sales'), paymentRoutes);
 app.use('/api/invoices', ...authorize('sales'), invoiceRoutes);
 app.use('/api/customers', ...authorize('sales'), customerRoutes);

@@ -50,6 +50,7 @@ export const NAV: NavSection[] = [
           { name: "Overview", href: "/dashboard/inventory", area: "inventory" },
           { name: "Products", href: "/dashboard/inventory/products", area: "inventory", keywords: ["items", "raw materials", "finished goods"] },
           { name: "Stock movements", href: "/dashboard/inventory/movements", area: "inventory", keywords: ["history"] },
+          { name: "Transfers", href: "/dashboard/inventory/transfers", area: "inventory", keywords: ["move stock", "branch", "store", "warehouse", "dispatch"] },
           { name: "Stock check", href: "/dashboard/inventory/stock-check", area: "inventory", keywords: ["reconcile", "count"] },
         ],
       },
