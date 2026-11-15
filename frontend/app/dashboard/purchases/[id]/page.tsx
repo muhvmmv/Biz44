@@ -21,6 +21,7 @@ interface PurchaseDetail {
   date: string;
   dueDate: string | null;
   subtotal: number;
+  taxTotal?: number;
   total: number;
   amountPaid: number;
   returnedAmount: number;
@@ -220,6 +221,9 @@ export default function PurchaseDetailPage() {
           <CardContent className="p-5">
             <p className="text-sm text-ink-soft">Total</p>
             <p className="text-2xl font-bold mt-1 text-ink">{format(purchase.total)}</p>
+            {(purchase.taxTotal ?? 0) > 0 && (
+              <p className="text-xs text-ink-soft mt-1">Goods {format(purchase.subtotal)} + VAT {format(purchase.taxTotal ?? 0)}</p>
+            )}
           </CardContent>
         </Card>
         <Card>

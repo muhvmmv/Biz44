@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "purchases" ADD COLUMN     "taxTotal" DOUBLE PRECISION NOT NULL DEFAULT 0;
+

@@ -168,6 +168,8 @@ model Purchase {
   date           DateTime          @default(now())
   dueDate        DateTime?
   subtotal       Float             @default(0)
+  /// VAT charged by the supplier (recoverable input VAT); total = subtotal + taxTotal.
+  taxTotal       Float             @default(0)
   total          Float             @default(0)
   amountPaid     Float             @default(0)
   /// Value of goods returned to the supplier and deducted from this purchase.

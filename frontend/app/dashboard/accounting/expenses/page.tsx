@@ -34,6 +34,7 @@ export default function ExpensesPage() {
   const [form, setForm] = useState({
     category: "General Expense",
     amount: 0,
+    vatAmount: 0,
     description: "",
     date: new Date().toISOString().split("T")[0],
   });
@@ -85,12 +86,17 @@ export default function ExpensesPage() {
       setError("Amount must be greater than 0");
       return;
     }
+    if (form.vatAmount >= form.amount) {
+      setError("The VAT included must be less than the amount paid");
+      return;
+    }
     setSubmitting(true);
     try {
       await apiFetch("/accounting/expenses", {
         method: "POST",
         body: JSON.stringify({
           amount: form.amount,
+          vatAmount: form.vatAmount || undefined,
           description: form.description,
           date: form.date,
           accountId,
@@ -102,6 +108,7 @@ export default function ExpensesPage() {
       setForm({
         category: categories[0]?.id ?? "",
         amount: 0,
+        vatAmount: 0,
         description: "",
         date: new Date().toISOString().split("T")[0],
       });
@@ -235,6 +242,17 @@ export default function ExpensesPage() {
                   onChange={(v) => setForm({ ...form, amount: v })}
                   required
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1 text-charcoal">
+                  VAT included
+                </label>
+                <NumericInput
+                  min={0}
+                  value={form.vatAmount}
+                  onChange={(v) => setForm({ ...form, vatAmount: v })}
+                />
+                <p className="text-xs text-ink-soft mt-1">Part of the amount that is VAT on the receipt. It is recovered, so the cost is {format(Math.max(0, form.amount - (form.vatAmount || 0)))}.</p>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1 text-charcoal">

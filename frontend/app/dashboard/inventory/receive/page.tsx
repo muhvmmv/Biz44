@@ -42,6 +42,13 @@ export default function ReceiveInventoryPage() {
   >("paid");
   const [partialAmount, setPartialAmount] = useState(0);
   const [dueDate, setDueDate] = useState("");
+  const [vatAmount, setVatAmount] = useState(0);
+  const [companyVatRate, setCompanyVatRate] = useState(0);
+  useEffect(() => {
+    apiFetch<{ success: boolean; data: { vatRate: number } }>("/settings/company")
+      .then((r) => setCompanyVatRate(r.data.vatRate ?? 0))
+      .catch(() => {});
+  }, []);
   const [paymentAccountId, setPaymentAccountId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -73,10 +80,12 @@ export default function ReceiveInventoryPage() {
     updateLine(index, { productId, unitCost: product?.cost || 0 });
   };
 
-  const total = items.reduce(
+  const goodsValue = items.reduce(
     (sum, item) => sum + item.quantity * item.unitCost,
     0
   );
+  // VAT on the supplier's invoice: recoverable, so it is not part of the stock cost.
+  const total = Math.round((goodsValue + (vatAmount || 0)) * 100) / 100;
   const amountPaid =
     paymentStatus === "paid"
       ? total
@@ -104,6 +113,7 @@ export default function ReceiveInventoryPage() {
         body: JSON.stringify({
           items,
           reference: reference || undefined,
+          vatAmount: vatAmount || undefined,
           notes: notes || undefined,
           supplierId: supplierId || undefined,
           paymentStatus,
@@ -271,6 +281,19 @@ export default function ReceiveInventoryPage() {
             <CardTitle>Payment</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1 text-charcoal">VAT on the supplier&apos;s invoice</label>
+              <div className="flex flex-wrap items-center gap-2">
+                <NumericInput min={0} value={vatAmount} onChange={setVatAmount} className="w-44" aria-label="VAT amount" />
+                {companyVatRate > 0 && goodsValue > 0 && (
+                  <button type="button" className="text-sm text-brand-dark hover:underline" onClick={() => setVatAmount(Math.round(goodsValue * companyVatRate) / 100)}>
+                    Add {companyVatRate}% ({format(Math.round(goodsValue * companyVatRate) / 100)})
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-ink-soft mt-1">Leave at 0 if the supplier charged no VAT. VAT is recovered from your VAT bill, so stock is valued without it.</p>
+            </div>
+
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-1 text-charcoal">
@@ -330,8 +353,20 @@ export default function ReceiveInventoryPage() {
             <div className="border-t border-border-soft pt-4 space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-ink-soft">Inventory value received</span>
-                <span className="font-medium text-ink">{format(total)}</span>
+                <span className="font-medium text-ink">{format(goodsValue)}</span>
               </div>
+              {vatAmount > 0 && (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-ink-soft">VAT (recoverable)</span>
+                    <span className="font-medium text-ink">{format(vatAmount)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-ink-soft">Supplier invoice total</span>
+                    <span className="font-medium text-ink">{format(total)}</span>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between">
                 <span className="text-ink-soft">Amount paid</span>
                 <span className="font-medium text-ink">{format(amountPaid)}</span>

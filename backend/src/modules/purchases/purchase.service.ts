@@ -57,7 +57,11 @@ export async function returnToSupplier(args: {
     );
   }
 
-  const value = round2(quantity * batch.unitCost);
+  // Goods go back at their cost; the supplier's VAT on them comes back too.
+  const goodsValue = round2(quantity * batch.unitCost);
+  const vatShare = purchase.subtotal > 0 ? (purchase.taxTotal ?? 0) / purchase.subtotal : 0;
+  const vatBack = round2(goodsValue * vatShare);
+  const value = round2(goodsValue + vatBack);
   const owed = Math.max(0, purchaseBalance(purchase));
   const appliedToBalance = Math.min(value, owed);
   const refund = round2(value - appliedToBalance);
@@ -89,6 +93,7 @@ export async function returnToSupplier(args: {
     const product = await tx.product.findFirst({ where: { id: batch.productId, companyId }, select: { itemType: true } });
     const inventory = await inventoryAccountFor(tx, companyId, product?.itemType);
     const ap = await systemAccount(tx, companyId, 'ap');
+    // Dr AP / Dr Cash (refund) = goods + their VAT; Cr Inventory (goods) + Cr VAT Recoverable (VAT)
     await postJournal(tx, {
       companyId,
       locationId: batch.locationId,
@@ -100,7 +105,8 @@ export async function returnToSupplier(args: {
       lines: [
         { accountId: ap.id, debit: appliedToBalance },
         ...(refund > 0 && refundAccount ? [{ accountId: refundAccount.id, debit: refund }] : []),
-        { accountId: inventory.id, credit: value },
+        { accountId: inventory.id, credit: goodsValue },
+        ...(vatBack > 0 ? [{ accountId: (await systemAccount(tx, companyId, 'vat_input')).id, credit: vatBack }] : []),
       ],
     });
 

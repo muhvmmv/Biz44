@@ -34,6 +34,7 @@ export const SYSTEM_ACCOUNTS = {
   inventory: { name: 'Finished Goods Inventory', type: 'asset', code: '1200' },
   inventory_raw: { name: 'Raw Materials & Packaging', type: 'asset', code: '1210' },
   inventory_wip: { name: 'Work in Progress', type: 'asset', code: '1220' },
+  vat_input: { name: 'VAT Recoverable', type: 'asset', code: '1300' },
   ap: { name: 'Accounts Payable', type: 'liability', code: '2000' },
   payroll_liabilities: { name: 'Payroll Deductions Payable', type: 'liability', code: '2100' },
   vat_payable: { name: 'VAT Payable', type: 'liability', code: '2200' },

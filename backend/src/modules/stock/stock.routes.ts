@@ -5,7 +5,7 @@ import { prisma } from '../../lib/prisma';
 import { AppError, badRequest, notFound } from '../../lib/errors';
 import { can } from '../../lib/permissions';
 import { resolvePaymentAccount, parsePositiveAmount, parsePositiveQuantity, parseQuantity, roundQty } from '../../lib/accounts';
-import { postJournal, systemAccount } from '../../lib/ledger';
+import { postJournal, systemAccount, round2 } from '../../lib/ledger';
 import {
   addStock, consumeFifo, stockAt, averageCost, syncProductTotals, postInventoryLoss, inventoryAccountFor,
 } from '../../lib/inventory';
@@ -144,7 +144,15 @@ router.post('/receive', resolveLocation, async (req: Request, res: Response, nex
       if (!supplier) throw notFound('Supplier not found');
     }
 
-    const totalCost = items.reduce((s, it) => s + it.quantity * it.unitCost, 0);
+    // Goods are valued without VAT; VAT charged by the supplier is recoverable
+    // input VAT, owed to the supplier with the goods.
+    const goodsValue = round2(items.reduce((s, it) => s + it.quantity * it.unitCost, 0));
+    let vatAmount = 0;
+    if (req.body?.vatAmount !== undefined && req.body?.vatAmount !== null && req.body?.vatAmount !== '' && Number(req.body.vatAmount) !== 0) {
+      vatAmount = parsePositiveAmount(req.body.vatAmount, 'VAT');
+      if (vatAmount > goodsValue + 0.01) throw badRequest('VAT cannot be more than the value of the goods');
+    }
+    const totalCost = round2(goodsValue + vatAmount);
     let paidAmount = 0;
     if (requestedStatus === 'paid') paidAmount = totalCost;
     else if (requestedStatus === 'partially_paid') {
@@ -172,7 +180,8 @@ router.post('/receive', resolveLocation, async (req: Request, res: Response, nex
           locationId,
           supplierId: supplierId || null,
           reference,
-          subtotal: totalCost,
+          subtotal: goodsValue,
+          taxTotal: vatAmount,
           total: totalCost,
           amountPaid: paidAmount,
           status: paymentStatus,
@@ -239,6 +248,10 @@ router.post('/receive', resolveLocation, async (req: Request, res: Response, nex
       for (const it of items) {
         const acc = await inventoryAccountFor(tx, companyId, typeOf.get(it.productId));
         debitByAccount.set(acc.id, (debitByAccount.get(acc.id) ?? 0) + it.quantity * it.unitCost);
+      }
+      if (vatAmount > 0) {
+        const vatInput = await systemAccount(tx, companyId, 'vat_input');
+        debitByAccount.set(vatInput.id, vatAmount);
       }
       const ap = await systemAccount(tx, companyId, 'ap');
       await postJournal(tx, {

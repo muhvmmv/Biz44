@@ -236,9 +236,10 @@ router.get('/vat', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const companyId = req.user!.companyId;
     const { from, to } = periodFromQuery(req);
-    const [company, account] = await Promise.all([
+    const [company, account, inputAccount] = await Promise.all([
       prisma.company.findUnique({ where: { id: companyId }, select: { vatRate: true, vatNumber: true } }),
       prisma.account.findFirst({ where: { companyId, systemKey: 'vat_payable' } }),
+      prisma.account.findFirst({ where: { companyId, systemKey: 'vat_input' } }),
     ]);
     const lines = account
       ? await prisma.journalLine.findMany({
@@ -247,7 +248,7 @@ router.get('/vat', async (req: Request, res: Response, next: NextFunction) => {
           orderBy: { entry: { date: 'asc' } },
         })
       : [];
-    let charged = 0, reversed = 0, paid = 0, adjusted = 0;
+    let charged = 0, reversed = 0, paid = 0, adjusted = 0, offset = 0;
     const months = new Map<string, { month: string; charged: number; reversed: number; paid: number }>();
     const payments: { id: string; date: Date; amount: number; reference: string | null; description: string }[] = [];
     for (const l of lines) {
@@ -256,12 +257,33 @@ router.get('/vat', async (req: Request, res: Response, next: NextFunction) => {
       const m = months.get(key) ?? { month: key, charged: 0, reversed: 0, paid: 0 };
       if (l.entry.sourceType === 'invoice') { charged += credit - debit; m.charged += credit - debit; }
       else if (l.entry.sourceType === 'invoice_cancel' || l.entry.sourceType === 'credit_note') { reversed += debit - credit; m.reversed += debit - credit; }
+      else if (l.entry.sourceType === 'vat_offset') { offset += debit - credit; }
       else if (l.entry.sourceType === 'vat_payment') {
         paid += debit - credit; m.paid += debit - credit;
         payments.push({ id: l.entry.id, date: l.entry.date, amount: round2(debit - credit), reference: l.entry.reference, description: l.entry.description });
       } else adjusted += credit - debit;
       months.set(key, m);
     }
+    // Input VAT: paid to suppliers on deliveries and expenses (recoverable),
+    // less returns to suppliers.
+    const inputLines = inputAccount
+      ? await prisma.journalLine.findMany({
+          where: { companyId, accountId: inputAccount.id, entry: { date: { ...(from && { gte: from }), ...(to && { lte: to }) } } },
+          include: { entry: { select: { sourceType: true, date: true } } },
+        })
+      : [];
+    let inputPaid = 0, inputReversed = 0;
+    for (const l of inputLines) {
+      const debit = Number(l.debit), credit = Number(l.credit);
+      if (l.entry.sourceType === 'vat_offset') continue;
+      const key = l.entry.date.toISOString().slice(0, 7);
+      const m = months.get(key) ?? { month: key, charged: 0, reversed: 0, paid: 0 };
+      if (l.entry.sourceType === 'supplier_return') inputReversed += credit - debit;
+      else inputPaid += debit - credit;
+      (m as any).input = ((m as any).input ?? 0) + (debit - credit);
+      months.set(key, m);
+    }
+
     // Invoices that charged VAT in the period (net of the discount, before VAT).
     const invoices = await prisma.invoice.findMany({
       where: {
@@ -279,13 +301,21 @@ router.get('/vat', async (req: Request, res: Response, next: NextFunction) => {
         vatRate: company?.vatRate ?? 0,
         vatNumber: company?.vatNumber ?? null,
         owed: round2(account?.balance ?? 0),
+        recoverable: round2(inputAccount?.balance ?? 0),
+        netDue: round2((account?.balance ?? 0) - (inputAccount?.balance ?? 0)),
         period: {
           charged: round2(charged), reversed: round2(reversed), net: round2(charged - reversed),
-          paid: round2(paid), adjusted: round2(adjusted),
+          paid: round2(paid), adjusted: round2(adjusted), offset: round2(offset),
+          inputPaid: round2(inputPaid), inputReversed: round2(inputReversed),
+          inputNet: round2(inputPaid - inputReversed),
+          netForPeriod: round2(charged - reversed - (inputPaid - inputReversed)),
         },
-        months: Array.from(months.values()).map((m) => ({
-          month: m.month, charged: round2(m.charged), reversed: round2(m.reversed), paid: round2(m.paid),
-        })),
+        months: Array.from(months.values())
+          .sort((a, b) => a.month.localeCompare(b.month))
+          .map((m) => ({
+            month: m.month, charged: round2(m.charged), reversed: round2(m.reversed), paid: round2(m.paid),
+            input: round2((m as any).input ?? 0),
+          })),
         payments: payments.reverse(),
         invoices: invoices.map((i) => ({
           id: i.id, invoiceNumber: i.invoiceNumber, date: i.finalizedAt, status: i.status, taxRate: i.taxRate,
@@ -294,6 +324,36 @@ router.get('/vat', async (req: Request, res: Response, next: NextFunction) => {
         })),
       },
     });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Set input VAT against output VAT when filing a return: Dr VAT Payable /
+ * Cr VAT Recoverable. Defaults to the most that can be set off.
+ */
+router.post('/vat/offset', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const companyId = req.user!.companyId;
+    const entry = await prisma.$transaction(async (tx) => {
+      const payable = await systemAccount(tx, companyId, 'vat_payable');
+      const input = await systemAccount(tx, companyId, 'vat_input');
+      const most = round2(Math.min(Math.max(0, payable.balance), Math.max(0, input.balance)));
+      const amount = req.body?.amount === undefined || req.body?.amount === '' ? most : parsePositiveAmount(req.body.amount);
+      if (!(amount > 0)) throw badRequest('There is no input VAT to set against VAT owed');
+      if (amount > most + 0.01) throw badRequest(`At most ${most.toFixed(2)} can be set off now`);
+      return postJournal(tx, {
+        companyId,
+        description: 'Input VAT set against VAT owed',
+        sourceType: 'vat_offset',
+        date: parseDate(req.body?.date) ?? new Date(),
+        createdById: req.user!.id,
+        lines: [
+          { accountId: payable.id, debit: amount },
+          { accountId: input.id, credit: amount },
+        ],
+      });
+    });
+    res.status(201).json({ success: true, data: entry });
   } catch (err) { next(err); }
 });
 
@@ -546,9 +606,16 @@ router.post('/expenses', resolveLocation, async (req: Request, res: Response, ne
       account: req.body?.account,
     });
     const locationId = requireTargetLocation(req);
+    // VAT included in the amount paid is recoverable input VAT, not a cost.
+    let vatAmount = 0;
+    if (req.body?.vatAmount !== undefined && req.body?.vatAmount !== null && req.body?.vatAmount !== '' && Number(req.body.vatAmount) !== 0) {
+      vatAmount = parsePositiveAmount(req.body.vatAmount, 'VAT');
+      if (vatAmount >= amount) throw badRequest('VAT must be less than the amount paid');
+    }
 
-    const entry = await prisma.$transaction((tx) =>
-      postJournal(tx, {
+    const entry = await prisma.$transaction(async (tx) => {
+      const vatInput = vatAmount > 0 ? await systemAccount(tx, companyId, 'vat_input') : null;
+      return postJournal(tx, {
         companyId,
         locationId,
         description: (description && String(description).trim()) || account!.name,
@@ -557,11 +624,12 @@ router.post('/expenses', resolveLocation, async (req: Request, res: Response, ne
         date: parseDate(date) ?? new Date(),
         createdById: req.user!.id,
         lines: [
-          { accountId: account!.id, debit: amount },
+          { accountId: account!.id, debit: round2(amount - vatAmount) },
+          ...(vatInput ? [{ accountId: vatInput.id, debit: vatAmount }] : []),
           { accountId: payFrom.id, credit: amount },
         ],
-      })
-    );
+      });
+    });
     res.status(201).json({ success: true, data: entry });
   } catch (err) { next(err); }
 });

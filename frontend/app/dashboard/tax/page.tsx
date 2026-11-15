@@ -26,8 +26,13 @@ interface VatReport {
   vatRate: number;
   vatNumber: string | null;
   owed: number;
-  period: { charged: number; reversed: number; net: number; paid: number; adjusted: number };
-  months: { month: string; charged: number; reversed: number; paid: number }[];
+  recoverable: number;
+  netDue: number;
+  period: {
+    charged: number; reversed: number; net: number; paid: number; adjusted: number; offset: number;
+    inputPaid: number; inputReversed: number; inputNet: number; netForPeriod: number;
+  };
+  months: { month: string; charged: number; reversed: number; paid: number; input: number }[];
   payments: { id: string; date: string; amount: number; reference: string | null; description: string }[];
   invoices: VatInvoice[];
 }
@@ -86,6 +91,21 @@ export default function TaxPage() {
     return () => { active = false; };
   }, [load, key]);
 
+  const [offsetting, setOffsetting] = useState(false);
+  const [offsetError, setOffsetError] = useState("");
+  const offset = async () => {
+    setOffsetting(true);
+    setOffsetError("");
+    try {
+      await apiFetch("/accounting/vat/offset", { method: "POST", body: JSON.stringify({}) });
+      setKey((k) => k + 1);
+    } catch (e: unknown) {
+      setOffsetError(e instanceof Error ? e.message : "Could not set off input VAT");
+    } finally {
+      setOffsetting(false);
+    }
+  };
+
   const openPay = () => {
     setAmount(report?.owed ?? 0);
     setReference("");
@@ -126,7 +146,7 @@ export default function TaxPage() {
     <div className="space-y-6">
       <PageHeader
         title="VAT"
-        description="VAT charged on your invoices is owed to the tax authority. It is kept in the VAT Payable account, not in your sales."
+        description="VAT you charge customers is owed to the tax authority; VAT you pay suppliers is recovered from it. Neither is part of your sales or costs."
         actions={
           <>
             <ButtonLink href="/dashboard/settings?tab=localization" variant="outline"><Settings size={16} /> VAT rate</ButtonLink>
@@ -159,11 +179,27 @@ export default function TaxPage() {
 
       {report && (
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <StatCard label="VAT owed now" value={format(report.owed)} tone={report.owed > 0 ? "negative" : "default"} hint={report.vatNumber ? `VAT ID ${report.vatNumber}` : `Rate ${report.vatRate}%`} />
-          <StatCard label="Charged in period" value={format(report.period.charged)} hint={report.period.reversed > 0 ? `${format(report.period.reversed)} reversed by cancellations` : undefined} />
-          <StatCard label="Net VAT for period" value={format(report.period.net)} />
-          <StatCard label="Paid in period" value={format(report.period.paid)} />
+          <StatCard label="Net VAT due now" value={format(report.netDue)} tone={report.netDue > 0 ? "negative" : report.netDue < 0 ? "positive" : "default"} hint={report.netDue < 0 ? "More input VAT than output: reclaimable" : report.vatNumber ? `VAT ID ${report.vatNumber}` : `Rate ${report.vatRate}%`} />
+          <StatCard label="Output VAT (on sales)" value={format(report.period.net)} hint={report.period.reversed > 0 ? `${format(report.period.charged)} charged, ${format(report.period.reversed)} reversed` : "Charged in period"} />
+          <StatCard label="Input VAT (on purchases)" value={format(report.period.inputNet)} hint={report.period.inputReversed > 0 ? `${format(report.period.inputReversed)} returned to suppliers` : "Paid in period, recoverable"} />
+          <StatCard label="Paid to tax authority" value={format(report.period.paid)} hint="In period" />
         </div>
+      )}
+
+      {report && report.owed > 0 && report.recoverable > 0 && (
+        <Card>
+          <CardContent className="flex flex-col gap-3 py-5 text-sm sm:flex-row sm:items-center sm:justify-between">
+            <p>
+              You owe <span className="font-semibold">{format(report.owed)}</span> output VAT and can recover{" "}
+              <span className="font-semibold">{format(report.recoverable)}</span> input VAT. When you file your return, set the input VAT
+              against what you owe, then pay the difference.
+            </p>
+            <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+              <Button variant="outline" onClick={offset} isLoading={offsetting}>Set off {format(Math.min(report.owed, report.recoverable))}</Button>
+              {offsetError && <span className="text-danger" role="alert">{offsetError}</span>}
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {report && report.months.length > 0 && (
@@ -177,7 +213,8 @@ export default function TaxPage() {
                     <th className="px-5 py-3 font-medium">Month</th>
                     <th className="px-5 py-3 text-right font-medium">Charged</th>
                     <th className="px-5 py-3 text-right font-medium">Reversed</th>
-                    <th className="px-5 py-3 text-right font-medium">Net</th>
+                    <th className="px-5 py-3 text-right font-medium">Net output</th>
+                    <th className="px-5 py-3 text-right font-medium">Input</th>
                     <th className="px-5 py-3 text-right font-medium">Paid</th>
                   </tr>
                 </thead>
@@ -188,6 +225,7 @@ export default function TaxPage() {
                       <td className="px-5 py-3 text-right tabular-nums">{format(m.charged)}</td>
                       <td className="px-5 py-3 text-right tabular-nums text-ink-soft">{m.reversed ? format(m.reversed) : "—"}</td>
                       <td className="px-5 py-3 text-right tabular-nums font-medium">{format(m.charged - m.reversed)}</td>
+                      <td className="px-5 py-3 text-right tabular-nums">{m.input ? format(m.input) : "—"}</td>
                       <td className="px-5 py-3 text-right tabular-nums">{m.paid ? format(m.paid) : "—"}</td>
                     </tr>
                   ))}
