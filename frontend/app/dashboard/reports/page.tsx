@@ -15,9 +15,9 @@ import {
 import ReportNotes from "@/components/reports/ReportNotes";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useLocationVersion } from "@/hooks/useLocationRefetch";
+import { useChartColors } from "@/hooks/useTheme";
 import { formatQty, itemTypeLabel } from "@/lib/units";
 
-const COLORS = ["#F05A28", "#1C1C1F", "#3B82F6", "#16A34A", "#A1A1AA", "#0D9488", "#B93D0C", "#66666E"];
 
 type Report = "overview" | "margins" | "production" | "stock";
 type Period = "month" | "last_month" | "quarter" | "year" | "all";
@@ -326,6 +326,7 @@ function StockMovement({ query }: { query: string }) {
 
 function Overview() {
   const { format } = useCurrency();
+  const cc = useChartColors();
   const version = useLocationVersion();
   const [loading, setLoading] = useState(true);
   const [salesByMonth, setSalesByMonth] = useState<{ month: string; total: number }[]>([]);
@@ -368,11 +369,11 @@ function Overview() {
             ) : (
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={salesByMonth}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E7E5E4" vertical={false} />
-                  <XAxis dataKey="month" stroke="#66666E" fontSize={12} />
-                  <YAxis stroke="#66666E" fontSize={12} />
-                  <Tooltip formatter={(value) => format(Number(value))} contentStyle={{ borderRadius: 8, border: "1px solid #E7E5E4", background: "#fff" }} />
-                  <Bar dataKey="total" name="Sales" fill="#F05A28" radius={[6, 6, 0, 0]} />
+                  <CartesianGrid strokeDasharray="4 6" stroke={cc.grid} vertical={false} />
+                  <XAxis dataKey="month" stroke={cc.axis} fontSize={12} tickLine={false} axisLine={false} />
+                  <YAxis stroke={cc.axis} fontSize={12} tickLine={false} axisLine={false} />
+                  <Tooltip formatter={(value) => format(Number(value))} contentStyle={{ borderRadius: 12, border: `1px solid ${cc.tooltipBorder}`, background: cc.tooltipBg, color: cc.label }} cursor={{ fill: cc.grid, opacity: 0.5 }} />
+                  <Bar dataKey="total" name="Sales" fill={cc.brand} radius={[8, 8, 3, 3]} maxBarSize={36} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -388,7 +389,7 @@ function Overview() {
               <ResponsiveContainer width="100%" height={280}>
                 <PieChart>
                   <Pie data={expenses} dataKey="total" nameKey="name" cx="50%" cy="50%" outerRadius={90} label>
-                    {expenses.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                    {expenses.map((_, i) => <Cell key={i} fill={cc.palette[i % cc.palette.length]} />)}
                   </Pie>
                   <Tooltip formatter={(value) => format(Number(value))} />
                   <Legend />

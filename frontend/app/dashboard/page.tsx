@@ -1,751 +1,746 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { ReactNode, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { apiFetch } from "@/lib/api";
-import { reportError } from "@/components/ui/Feedback";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import Button from "@/components/ui/Button";
-import Badge from "@/components/ui/Badge";
-import Skeleton from "@/components/ui/Skeleton";
+import { motion, type Variants } from "framer-motion";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend, PieChart, Pie, Cell, LabelList,
+  Area, AreaChart, Bar, CartesianGrid, Cell, ComposedChart, Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  ArrowUpRight, ArrowDownRight, AlertTriangle, Package, Users,
-  DollarSign, TrendingUp, Plus, Receipt, ShoppingCart,
+  AlertCircle, ArrowDownRight, ArrowUpRight, Boxes, CalendarClock, ChevronRight, Factory, FileText, Landmark,
+  PackageX, Receipt, TrendingUp, Truck, Wallet,
 } from "lucide-react";
+import { apiFetch } from "@/lib/api";
+import { reportError } from "@/components/ui/Feedback";
+import CountUp from "@/components/dashboard/CountUp";
+import { StatusBadge } from "@/components/ui/Badge";
+import Skeleton from "@/components/ui/Skeleton";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrency } from "@/hooks/useCurrency";
+import { useLocation } from "@/hooks/useLocation";
 import { useLocationVersion } from "@/hooks/useLocationRefetch";
-import { getBusinessConfig } from "@/lib/business-config";
+import { useChartColors } from "@/hooks/useTheme";
 import { formatQty } from "@/lib/units";
 import { can } from "@/lib/permissions";
+import { cn } from "@/lib/utils";
 
-interface DashboardSummary {
-  revenue: number;
-  revenueChange: number;
-  cogs: number;
-  grossProfit: number;
-  grossMargin: number;
-  opex: number;
-  netProfit: number;
-  netMargin: number;
-  profit: number;
-  profitMargin: number;
-  expenses: number;
-  netCash: number;
-  totalCash: number;
-  cashIn: number;
-  cashOut: number;
-  cashAccounts: { id: string; name: string; subtype: string; balance: number }[];
-  outstanding: number;
-  overdueCount: number;
-  unpaidCount: number;
-  totalUnits: number;
-  inventoryValue: number;
-  lowStock: number;
-  outOfStock: number;
-  dueToday: number;
-  expectedToday: number;
-  topProducts: { name: string; total: number }[];
-  supplierOutstanding: number;
-  supplierUnpaidCount: number;
-  supplierOverdueAmount: number;
-  supplierOverdueCount: number;
-  inventoryByStage?: { raw: number; wip: number; finished: number };
-  production?: {
+// ---------------------------------------------------------------- types
+interface Summary {
+  revenue: number | null;
+  revenueChange: number | null;
+  grossProfit: number | null;
+  grossMargin: number | null;
+  netProfit: number | null;
+  netMargin: number | null;
+  opex: number | null;
+  cogs: number | null;
+  totalCash: number | null;
+  cashIn: number | null;
+  cashOut: number | null;
+  cashAccounts: { id: string; name: string; subtype: string; balance: number }[] | null;
+  outstanding: number | null;
+  overdueCount: number | null;
+  unpaidCount: number | null;
+  dueToday: number | null;
+  expectedToday: number | null;
+  lowStock: number | null;
+  outOfStock: number | null;
+  topProducts: { name: string; total: number }[] | null;
+  supplierOutstanding: number | null;
+  supplierUnpaidCount: number | null;
+  supplierOverdueAmount: number | null;
+  supplierOverdueCount: number | null;
+  inventoryValue: number | null;
+  inventoryByStage: { raw: number; wip: number; finished: number } | null;
+  production: {
     completedOrders: number;
     inProgressOrders: number;
     draftOrders: number;
     totalCost: number;
     wipValue: number;
-    products: { name: string; unit: string; produced: number; unitCost: number; yieldPercent: number | null }[];
-  };
+    products: { name: string; unit: string; produced: number; planned?: number; unitCost: number; yieldPercent: number | null }[];
+  } | null;
 }
-
+interface MonthRow { month: string; revenue: number; cogs: number; opex: number; grossProfit: number; netProfit: number }
 interface RecentInvoice {
-  id: string;
-  invoiceNumber: string;
-  total: number;
-  status: string;
-  customer?: { firstName: string; lastName: string } | null;
+  id: string; invoiceNumber: string; total: number; status: string; createdAt: string; dueDate: string | null;
+  customer?: { firstName: string; lastName: string } | null; customerName?: string | null;
 }
+interface TopCustomer { id: string; name: string; sales: number; outstanding: number; invoices: number }
 
-const CHART = {
-  revenue: "#F05A28",
-  profit: "#4F8068",
-  loss: "#B94A48",
-  expenses: "#A1A1AA",
+// ---------------------------------------------------------------- motion
+const container: Variants = { hidden: {}, show: { transition: { staggerChildren: 0.06, delayChildren: 0.05 } } };
+const rise: Variants = {
+  hidden: { opacity: 0, y: 18, scale: 0.985 },
+  show: { opacity: 1, y: 0, scale: 1, transition: { type: "spring", stiffness: 260, damping: 26 } },
 };
 
-const PIE_COLORS = ["#F05A28", "#1C1C1F", "#3B82F6", "#16A34A", "#A1A1AA", "#0D9488"];
+const RANGES = [
+  { value: 1, label: "This month" },
+  { value: 3, label: "3M" },
+  { value: 6, label: "6M" },
+  { value: 12, label: "12M" },
+];
 
-function formatCompact(value: number, currency: string): string {
-  const symbol =
-    currency === "NGN" ? "₦" :
-    currency === "USD" ? "$" :
-    currency === "EUR" ? "€" :
-    currency === "GBP" ? "£" :
-    currency === "KES" ? "KSh" :
-    currency === "GHS" ? "₵" :
-    currency === "ZAR" ? "R" :
-    currency === "INR" ? "₹" : "";
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000_000) return `${symbol}${(value / 1_000_000_000).toFixed(1)}B`;
-  if (abs >= 1_000_000) return `${symbol}${(value / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `${symbol}${(value / 1_000).toFixed(0)}k`;
-  return `${symbol}${value.toFixed(0)}`;
+function greeting() {
+  const h = new Date().getHours();
+  return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
 }
 
+function monthLabel(m: string) {
+  if (/^\d{4}-\d{2}$/.test(m)) {
+    const [y, mo] = m.split("-").map(Number);
+    return new Date(y, mo - 1, 1).toLocaleDateString(undefined, { month: "short" });
+  }
+  return m;
+}
+
+/** Money that fits a small tile: full below a million, else ₦1.41M. */
+function shortMoney(format: (n: number) => string, n: number) {
+  if (Math.abs(n) < 1e6) return format(n).replace(/\.00$/, "");
+  const symbol = format(0).replace(/[\d.,\s]/g, "");
+  return `${n < 0 ? "-" : ""}${symbol}${(Math.abs(n) / 1e6).toFixed(2)}M`;
+}
+
+/** Short money for chart axes: ₦1.2M, ₦850k. */
+function compact(symbol: string, v: number) {
+  const a = Math.abs(v);
+  if (a >= 1e9) return `${symbol}${(v / 1e9).toFixed(1)}B`;
+  if (a >= 1e6) return `${symbol}${(v / 1e6).toFixed(1)}M`;
+  if (a >= 1e3) return `${symbol}${(v / 1e3).toFixed(0)}k`;
+  return `${symbol}${v.toFixed(0)}`;
+}
+
+// ---------------------------------------------------------------- page
 export default function DashboardPage() {
   const { user } = useAuth();
   const { format, currency } = useCurrency();
+  const { activeLocation, locations, activeLocationId } = useLocation();
   const version = useLocationVersion();
-  const config = getBusinessConfig(user?.businessType);
   const perms = user?.permissions;
   const canMoney = can(perms, "money");
   const canSales = can(perms, "sales");
+  const canInventory = can(perms, "inventory");
 
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [chartData, setChartData] = useState<{
-    month: string;
-    revenue: number;
-    cogs: number;
-    opex: number;
-    grossProfit: number;
-    netProfit: number;
-  }[]>([]);
   const [range, setRange] = useState(12);
-  const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [chart, setChart] = useState<MonthRow[]>([]);
+  const [recent, setRecent] = useState<RecentInvoice[] | null>(null);
+  const [topCustomers, setTopCustomers] = useState<TopCustomer[] | null>(null);
 
   useEffect(() => {
     let active = true;
-
     Promise.all([
-      apiFetch<{ success: boolean; data: DashboardSummary }>(`/dashboard/summary?months=${range}`),
+      apiFetch<{ success: boolean; data: Summary }>(`/dashboard/summary?months=${range}`),
       canMoney
-        ? apiFetch<{ success: boolean; data: typeof chartData }>(`/dashboard/monthly-chart?months=${range}`)
-        : Promise.resolve({ success: true, data: [] as typeof chartData }),
+        ? apiFetch<{ success: boolean; data: MonthRow[] }>(`/dashboard/monthly-chart?months=${Math.max(range, 6)}`)
+        : Promise.resolve({ success: true, data: [] as MonthRow[] }),
     ])
-      .then(([s, c]) => {
-        if (!active) return;
-        setSummary(s.data);
-        setChartData(c.data);
-      })
-      .catch((e: unknown) => reportError(e, "Could not load this page"))
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
+      .then(([s, c]) => { if (active) { setSummary(s.data); setChart(c.data); } })
+      .catch((e: unknown) => reportError(e, "Could not load the dashboard"));
+    return () => { active = false; };
   }, [range, version, canMoney]);
 
+  useEffect(() => {
+    if (!canSales) return;
+    let active = true;
+    Promise.all([
+      apiFetch<{ success: boolean; data: RecentInvoice[] }>("/dashboard/recent-invoices"),
+      apiFetch<{ success: boolean; data: TopCustomer[] }>(`/dashboard/top-customers?months=${range}`),
+    ])
+      .then(([r, t]) => { if (active) { setRecent(r.data); setTopCustomers(t.data); } })
+      .catch(() => { if (active) { setRecent([]); setTopCustomers([]); } });
+    return () => { active = false; };
+  }, [version, canSales, range]);
+
+  const symbol = useMemo(() => format(0).replace(/[\d.,\s]/g, "") || "", [format]);
+  const branch = activeLocationId === "all" ? (locations.length > 1 ? "all branches" : null) : activeLocation?.name ?? null;
+  const attentionCount =
+    (summary?.overdueCount ?? 0) + (summary?.supplierOverdueCount ?? 0) + (summary?.outOfStock ?? 0) + (summary?.lowStock ?? 0) + (summary?.dueToday ?? 0);
+
   return (
-    <div className="space-y-6">
-      {/* HEADER */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+    <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
+      {/* ---------- Greeting ---------- */}
+      <motion.div variants={rise} className="flex flex-col gap-4 pt-2 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-ink">
-            Good {getGreeting()}, {user?.firstName || "there"}
-          </h1>
-          <p className="text-ink-soft mt-1 text-sm">
-            Here&apos;s what&apos;s happening with your {config.label.toLowerCase()} business.
+          <p className="text-sm font-medium text-ink-soft">
+            {new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
+            {branch && <> · <span className="text-ink">{branch}</span></>}
           </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <select
-            value={range}
-            onChange={(e) => {
-              setLoading(true);
-              setRange(Number(e.target.value));
-            }}
-            className="border border-border-soft rounded-lg px-3 py-2 text-sm bg-white text-charcoal focus:outline-none focus:ring-2 focus:ring-brand"
-          >
-            <option value={1}>This month</option>
-            <option value={3}>Last 3 months</option>
-            <option value={6}>Last 6 months</option>
-            <option value={12}>Last 12 months</option>
-          </select>
-          {can(perms, "sales", "write") && (
-            <Link href="/dashboard/invoices/new">
-              <Button>
-                <Plus className="w-4 h-4 mr-1" /> Create Invoice
-              </Button>
-            </Link>
+          <h1 className="mt-1 text-3xl font-bold tracking-tight text-ink sm:text-4xl">
+            {greeting()}, <span className="bg-gradient-to-r from-orange-500 to-orange-600 bg-clip-text text-transparent">{user?.firstName || "there"}</span>
+          </h1>
+          {summary && (
+            <p className="mt-1.5 text-sm text-ink-soft">
+              {attentionCount > 0
+                ? <>You have <span className="font-semibold text-ink">{attentionCount}</span> thing{attentionCount === 1 ? "" : "s"} that need attention today.</>
+                : "Everything is on track today."}
+            </p>
           )}
         </div>
+        <RangePicker value={range} onChange={setRange} />
+      </motion.div>
+
+      {!summary ? (
+        <DashboardSkeleton />
+      ) : (
+        <>
+          {/* ---------- Money + charts ---------- */}
+          {canMoney && (
+            <div className="grid gap-5 xl:grid-cols-12">
+              <div className="space-y-5 xl:col-span-4">
+                <motion.div variants={rise}><BalanceCard summary={summary} format={format} currency={currency} /></motion.div>
+                <div className="grid grid-cols-2 gap-4">
+                  <motion.div variants={rise}>
+                    <KpiCard
+                      label="Revenue" value={summary.revenue ?? 0} format={format} icon={<TrendingUp size={17} />} tint="from-orange-400 to-orange-600"
+                      change={summary.revenueChange} changeLabel="vs last month" series={chart.map((m) => m.revenue)} color="brand" href="/dashboard/reports"
+                    />
+                  </motion.div>
+                  <motion.div variants={rise}>
+                    <KpiCard
+                      label="Gross profit" value={summary.grossProfit ?? 0} format={format} icon={<Boxes size={17} />} tint="from-emerald-400 to-green-600"
+                      note={`${(summary.grossMargin ?? 0).toFixed(1)}% margin`} series={chart.map((m) => m.grossProfit)} color="green" href="/dashboard/accounting/profit-loss"
+                    />
+                  </motion.div>
+                  <motion.div variants={rise}>
+                    <KpiCard
+                      label="Net profit" value={summary.netProfit ?? 0} format={format} icon={<Wallet size={17} />} tint="from-violet-400 to-purple-600"
+                      note={`${(summary.netMargin ?? 0).toFixed(1)}% margin`} series={chart.map((m) => m.netProfit)} color="violet" href="/dashboard/accounting/profit-loss"
+                      negative={(summary.netProfit ?? 0) < 0}
+                    />
+                  </motion.div>
+                  <motion.div variants={rise}>
+                    <KpiCard
+                      label="Outstanding" value={summary.outstanding ?? 0} format={format} icon={<Receipt size={17} />} tint="from-sky-400 to-blue-600"
+                      note={`${summary.unpaidCount ?? 0} unpaid invoice${summary.unpaidCount === 1 ? "" : "s"}`} color="blue" href="/dashboard/accounting/receivable"
+                      progress={summary.outstanding ? Math.min(1, (summary.expectedToday ?? 0) / summary.outstanding) : 0}
+                    />
+                  </motion.div>
+                </div>
+              </div>
+
+              <div className="space-y-5 xl:col-span-8">
+                <div className="grid gap-5 lg:grid-cols-5">
+                  <motion.div variants={rise} className="lg:col-span-3">
+                    <PerformanceChart data={chart} format={format} symbol={symbol} />
+                  </motion.div>
+                  <motion.div variants={rise} className="lg:col-span-2">
+                    <TopProducts products={summary.topProducts ?? []} format={format} />
+                  </motion.div>
+                </div>
+                <motion.div variants={rise}><NeedsAttention summary={summary} format={format} /></motion.div>
+              </div>
+            </div>
+          )}
+
+          {!canMoney && <motion.div variants={rise}><NeedsAttention summary={summary} format={format} /></motion.div>}
+
+          {/* ---------- Operations ---------- */}
+          <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
+            {canInventory && summary.inventoryByStage && (
+              <motion.div variants={rise}><InventoryByStage stages={summary.inventoryByStage} format={format} /></motion.div>
+            )}
+            {canInventory && summary.production && (
+              <motion.div variants={rise}><ProductionThisMonth production={summary.production} format={format} /></motion.div>
+            )}
+            {canSales && (
+              <motion.div variants={rise} className={cn(!canInventory && "lg:col-span-2 xl:col-span-3")}>
+                <TopCustomers rows={topCustomers} format={format} />
+              </motion.div>
+            )}
+          </div>
+
+          {canSales && <motion.div variants={rise}><RecentInvoices rows={recent} format={format} /></motion.div>}
+        </>
+      )}
+    </motion.div>
+  );
+}
+
+// ---------------------------------------------------------------- pieces
+function Panel({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn("rounded-[24px] border border-border-soft bg-surface p-5 shadow-card", className)}>{children}</div>;
+}
+
+function PanelHead({ title, href, linkLabel = "View all", extra }: { title: string; href?: string; linkLabel?: string; extra?: ReactNode }) {
+  return (
+    <div className="mb-4 flex items-center justify-between gap-3">
+      <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
+      <div className="flex items-center gap-2">
+        {extra}
+        {href && (
+          <Link href={href} className="group inline-flex items-center gap-0.5 text-xs font-semibold text-ink-soft hover:text-brand-dark">
+            {linkLabel}<ChevronRight size={14} className="transition-transform group-hover:translate-x-0.5" />
+          </Link>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RangePicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="flex rounded-full border border-border-soft bg-surface/80 p-1 shadow-card" role="tablist" aria-label="Period">
+      {RANGES.map((r) => (
+        <button
+          key={r.value}
+          role="tab"
+          aria-selected={value === r.value}
+          onClick={() => onChange(r.value)}
+          className={cn("relative rounded-full px-3.5 py-1.5 text-sm font-semibold transition-colors", value === r.value ? "text-white" : "text-ink-soft hover:text-ink")}
+        >
+          {value === r.value && (
+            <motion.span layoutId="range-pill" className="absolute inset-0 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 shadow" transition={{ type: "spring", stiffness: 420, damping: 32 }} />
+          )}
+          <span className="relative">{r.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function BalanceCard({ summary, format, currency }: { summary: Summary; format: (n: number) => string; currency: string }) {
+  const accounts = summary.cashAccounts ?? [];
+  const shown = accounts.slice(0, 3);
+  return (
+    <div className="brand-card relative overflow-hidden rounded-[28px] p-6 text-white shadow-[0_24px_50px_-20px_rgb(240_90_40/0.65)]">
+      {/* decorative rings */}
+      <motion.span
+        aria-hidden="true"
+        className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full border-[28px] border-white/10"
+        animate={{ rotate: 360 }}
+        transition={{ duration: 60, repeat: Infinity, ease: "linear" }}
+      />
+      <span aria-hidden="true" className="pointer-events-none absolute -bottom-24 -left-10 h-48 w-48 rounded-full bg-white/10 blur-2xl" />
+
+      <div className="relative flex items-start justify-between">
+        <div className="flex items-center gap-2 text-sm font-medium text-white/85">
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/20 backdrop-blur"><Landmark size={16} /></span>
+          Total cash &amp; bank
+        </div>
+        <span className="rounded-full border border-white/25 bg-white/15 px-2.5 py-1 text-xs font-bold tracking-wide backdrop-blur">{currency}</span>
       </div>
 
-      {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => (
-            <Skeleton key={i} className="h-32" />
+      <p className="relative mt-4 text-[34px] font-bold leading-none tracking-tight sm:text-[40px]">
+        <CountUp value={summary.totalCash ?? 0} format={format} duration={1.6} />
+      </p>
+      <div className="relative mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-white/85">
+        <span className="inline-flex items-center gap-1"><ArrowDownRight size={15} className="rotate-180" /> In <CountUp value={summary.cashIn ?? 0} format={format} /></span>
+        <span className="inline-flex items-center gap-1"><ArrowDownRight size={15} /> Out <CountUp value={summary.cashOut ?? 0} format={format} /></span>
+      </div>
+
+      {shown.length > 0 && (
+        <div className="relative mt-5 grid grid-cols-3 gap-2.5">
+          {shown.map((a, i) => (
+            <motion.div
+              key={a.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.35 + i * 0.08 }}
+            >
+              <Link
+                href={`/dashboard/accounting/accounts/${a.id}`}
+                className="block rounded-2xl border border-white/20 bg-white/15 p-3 backdrop-blur transition-colors hover:bg-white/25"
+              >
+                <p className="truncate text-xs font-semibold text-white/80">{a.name}</p>
+                <p className="mt-1 truncate text-sm font-bold" title={format(a.balance)}><CountUp value={a.balance} format={(n) => shortMoney(format, n)} delay={0.2} /></p>
+              </Link>
+            </motion.div>
           ))}
         </div>
-      ) : summary ? (
-        <>
-          {/* KPI CARDS */}
-          {canMoney && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <KpiCard
-              title={range === 1 ? "Revenue this month" : `Revenue · ${range} months`}
-              value={format(summary.revenue)}
-              change={`${summary.revenueChange >= 0 ? "+" : ""}${summary.revenueChange.toFixed(1)}% vs last month`}
-              trend={summary.revenueChange >= 0 ? "up" : "down"}
-              icon={<DollarSign className="w-5 h-5" />}
-              accent="rose"
-              href="/dashboard/reports"
-            />
-            <KpiCard
-              title="Gross Profit"
-              value={format(summary.grossProfit)}
-              change={`${summary.grossMargin.toFixed(1)}% gross margin`}
-              trend={summary.grossProfit >= 0 ? "up" : "down"}
-              icon={<TrendingUp className="w-5 h-5" />}
-              accent="charcoal"
-              href="/dashboard/accounting/profit-loss"
-            />
-            <KpiCard
-              title="Net Profit"
-              value={format(summary.netProfit)}
-              change={`${summary.netMargin.toFixed(1)}% net margin`}
-              trend={summary.netProfit >= 0 ? "up" : "down"}
-              icon={<TrendingUp className="w-5 h-5" />}
-              accent={summary.netProfit >= 0 ? "green" : "terracotta"}
-              href="/dashboard/accounting/profit-loss"
-            />
-            <KpiCard
-              title="Outstanding"
-              value={format(summary.outstanding)}
-              change={`${summary.unpaidCount} unpaid`}
-              trend="down"
-              icon={<Receipt className="w-5 h-5" />}
-              accent="terracotta"
-              href="/dashboard/accounting/receivable"
-            />
-          </div>
-          )}
-
-          {/* CASH POSITION */}
-          {canMoney && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Cash position</CardTitle>
-              <Link href="/dashboard/accounting/accounts" className="text-sm font-medium text-brand-dark hover:underline">
-                Cash &amp; Banks
-              </Link>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                <div className="col-span-2 rounded-xl bg-charcoal text-white p-4">
-                  <p className="text-xs text-white/70">Total cash &amp; bank</p>
-                  <p className="text-2xl font-bold tabular-nums mt-1">{format(summary.totalCash)}</p>
-                  <p className="text-xs text-white/70 mt-1">
-                    In {format(summary.cashIn)} · Out {format(summary.cashOut)}
-                  </p>
-                </div>
-                {summary.cashAccounts.map((a) => (
-                  <Link
-                    key={a.id}
-                    href={`/dashboard/accounting/accounts/${a.id}`}
-                    className="rounded-xl border border-border-soft p-4 hover:border-brand transition-colors"
-                  >
-                    <p className="text-xs text-ink-soft truncate">{a.name}</p>
-                    <p className={`text-lg font-semibold tabular-nums mt-1 ${a.balance < 0 ? "text-danger" : "text-ink"}`}>
-                      {format(a.balance)}
-                    </p>
-                  </Link>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-          )}
-
-          {summary.inventoryByStage && summary.production && (
-            <FactoryOverview stages={summary.inventoryByStage} production={summary.production} format={format} />
-          )}
-
-          {/* CHARTS */}
-          {canMoney && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <Card className="lg:col-span-2">
-              <CardHeader>
-                <CardTitle>Sales, Profit &amp; Expenses</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={340}>
-                  <BarChart
-                    data={chartData}
-                    margin={{ top: 28, right: 12, left: 4, bottom: 4 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5DFDC" />
-                    <XAxis dataKey="month" fontSize={12} stroke="#6B6563" />
-                    <YAxis
-                      fontSize={12}
-                      stroke="#6B6563"
-                      domain={[0, (dataMax: number) => dataMax * 1.18]}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        borderRadius: 8,
-                        border: "1px solid #E5DFDC",
-                        background: "#fff",
-                      }}
-                      formatter={(value) => format(Number(value))}
-                    />
-                    <Legend />
-
-                    <Bar dataKey="revenue" fill={CHART.revenue} radius={[6, 6, 0, 0]} name="Revenue">
-                      <LabelList
-                        dataKey="revenue"
-                        position="top"
-                        formatter={(v) => formatCompact(Number(v), currency)}
-                        style={{ fontSize: 10, fill: "#6B6563", fontWeight: 600 }}
-                      />
-                    </Bar>
-
-                    <Bar dataKey="netProfit" fill={CHART.profit} radius={[6, 6, 0, 0]} name="Net Profit">
-                      {chartData.map((entry, i) => (
-                        <Cell
-                          key={i}
-                          fill={entry.netProfit >= 0 ? CHART.profit : CHART.loss}
-                        />
-                      ))}
-                      <LabelList
-                        dataKey="netProfit"
-                        position="top"
-                        formatter={(v) => formatCompact(Number(v), currency)}
-                        style={{ fontSize: 10, fill: "#6B6563", fontWeight: 600 }}
-                      />
-                    </Bar>
-
-                    <Bar dataKey="opex" fill={CHART.expenses} radius={[6, 6, 0, 0]} name="Expenses">
-                      <LabelList
-                        dataKey="opex"
-                        position="top"
-                        formatter={(v) => formatCompact(Number(v), currency)}
-                        style={{ fontSize: 10, fill: "#6B6563", fontWeight: 600 }}
-                      />
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Top Products</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {summary.topProducts.length === 0 ? (
-                  <p className="text-center text-ink-soft py-12 text-sm">No sales yet</p>
-                ) : (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <PieChart>
-                      <Pie
-                        data={summary.topProducts}
-                        dataKey="total"
-                        nameKey="name"
-                        cx="50%"
-                        cy="50%"
-                        outerRadius={80}
-                        label={(entry) => entry.name}
-                      >
-                        {summary.topProducts.map((_, i) => (
-                          <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(v) => format(Number(v))} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          )}
-
-          {/* NEEDS ATTENTION — now 4 columns including supplier outstanding */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-warning" />
-                Needs Attention
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {summary.overdueCount !== null && (
-              <AttentionItem
-                label="Overdue invoices"
-                value={summary.overdueCount || "All clear"}
-                variant={summary.overdueCount > 0 ? "danger" : "success"}
-                href="/dashboard/accounting/receivable"
-              />
-              )}
-              {summary.supplierUnpaidCount !== null && (
-              <AttentionItem
-                label="Supplier payments due"
-                value={
-                  summary.supplierOverdueCount > 0
-                    ? `${summary.supplierOverdueCount} overdue`
-                    : summary.supplierUnpaidCount > 0
-                    ? `${summary.supplierUnpaidCount} unpaid`
-                    : "All clear"
-                }
-                variant={
-                  summary.supplierOverdueCount > 0
-                    ? "danger"
-                    : summary.supplierUnpaidCount > 0
-                    ? "warning"
-                    : "success"
-                }
-                href="/dashboard/purchases?status=unpaid"
-                sublabel={
-                  summary.supplierOutstanding > 0
-                    ? format(summary.supplierOutstanding)
-                    : undefined
-                }
-              />
-              )}
-              {summary.lowStock !== null && (
-              <AttentionItem
-                label="Low stock products"
-                value={summary.lowStock || "All clear"}
-                variant={summary.lowStock > 0 ? "warning" : "success"}
-                href="/dashboard/inventory/products"
-              />
-              )}
-              {summary.dueToday !== null && (
-              <AttentionItem
-                label={`Due today — ${format(summary.expectedToday)}`}
-                value={summary.dueToday || "None"}
-                variant={summary.dueToday > 0 ? "info" : "success"}
-                href="/dashboard/invoices"
-              />
-              )}
-            </CardContent>
-          </Card>
-
-          {/* QUICK ACTIONS */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            {can(perms, "sales", "write") && <QuickAction label="New Invoice" icon={<Plus className="w-5 h-5" />} href="/dashboard/invoices/new" />}
-            {can(perms, "sales", "write") && <QuickAction label="Add Customer" icon={<Users className="w-5 h-5" />} href="/dashboard/customers?new=1" />}
-            {can(perms, "inventory", "write") && <QuickAction label="Add Product" icon={<Package className="w-5 h-5" />} href="/dashboard/inventory/products?new=1" />}
-            {can(perms, "purchasing", "write") && <QuickAction label="Receive Inventory" icon={<ShoppingCart className="w-5 h-5" />} href="/dashboard/inventory/receive" />}
-            {can(perms, "money", "write") && <QuickAction label="Record Expense" icon={<Receipt className="w-5 h-5" />} href="/dashboard/accounting/expenses?new=1" />}
-          </div>
-
-          {canSales && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <RecentInvoices version={version} format={format} />
-              <TopCustomers />
-            </div>
-          )}
-        </>
-      ) : null}
+      )}
+      <Link href="/dashboard/accounting/accounts" className="relative mt-4 inline-flex items-center gap-1 text-xs font-semibold text-white/85 hover:text-white">
+        {accounts.length > 3 ? `All ${accounts.length} accounts` : "Cash & Banks"} <ChevronRight size={14} />
+      </Link>
     </div>
   );
 }
 
-function FactoryOverview({
-  stages,
-  production,
-  format,
+const SPARK: Record<string, string> = { brand: "#F05A28", green: "#16A34A", violet: "#7C3AED", blue: "#3B82F6" };
+
+function KpiCard({
+  label, value, format, icon, tint, change, changeLabel, note, series, color, href, negative, progress,
 }: {
-  stages: NonNullable<DashboardSummary["inventoryByStage"]>;
-  production: NonNullable<DashboardSummary["production"]>;
-  format: (n: number) => string;
+  label: string; value: number; format: (n: number) => string; icon: ReactNode; tint: string;
+  change?: number | null; changeLabel?: string; note?: string; series?: number[]; color: string; href: string; negative?: boolean; progress?: number;
 }) {
+  const up = (change ?? 0) >= 0;
+  const data = (series ?? []).map((v, i) => ({ i, v }));
+  return (
+    <Link href={href} className="lift group @container relative flex h-full flex-col overflow-hidden rounded-[22px] border border-border-soft bg-surface p-4 shadow-card">
+      <div className="flex items-center justify-between">
+        <span className={cn("app-icon flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br text-white", tint)}>{icon}</span>
+        <ArrowUpRight size={16} className="text-ink-faint transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-ink" />
+      </div>
+      <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-ink-soft">{label}</p>
+      <p className={cn("mt-1 truncate text-base font-bold tracking-tight @[190px]:text-xl", negative ? "text-danger" : "text-ink")} title={format(value)}>
+        <CountUp value={value} format={format} />
+      </p>
+      {change !== undefined && change !== null ? (
+        <p className={cn("mt-1 inline-flex items-center gap-1 text-xs font-semibold", up ? "text-success" : "text-danger")}>
+          {up ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}{Math.abs(change).toFixed(1)}%
+          <span className="font-normal text-ink-faint">{changeLabel}</span>
+        </p>
+      ) : note ? (
+        <p className="mt-1 truncate text-xs text-ink-soft">{note}</p>
+      ) : null}
+      {data.length > 1 ? (
+        <div className="-mx-4 -mb-4 mt-3 h-12">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={data} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
+              <defs>
+                <linearGradient id={`spark-${color}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={SPARK[color]} stopOpacity={0.35} />
+                  <stop offset="100%" stopColor={SPARK[color]} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <Area type="monotone" dataKey="v" stroke={SPARK[color]} strokeWidth={2} fill={`url(#spark-${color})`} animationDuration={1400} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      ) : progress !== undefined ? (
+        <div className="mt-auto pt-3">
+          <div className="h-1.5 overflow-hidden rounded-full bg-surface-muted">
+            <motion.div className="h-full rounded-full bg-gradient-to-r from-sky-400 to-blue-600" initial={{ width: 0 }} animate={{ width: `${Math.max(4, progress * 100)}%` }} transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1], delay: 0.3 }} />
+          </div>
+          <p className="mt-1 text-[11px] text-ink-faint">Due today vs outstanding</p>
+        </div>
+      ) : null}
+    </Link>
+  );
+}
+
+function ChartTooltip({ active, payload, label, format }: { active?: boolean; payload?: { name: string; value: number; color: string }[]; label?: string; format: (n: number) => string }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="glass-strong rounded-2xl px-3.5 py-2.5 text-xs">
+      <p className="mb-1.5 font-semibold text-ink">{label}</p>
+      {payload.map((p) => (
+        <p key={p.name} className="flex items-center justify-between gap-6 py-0.5">
+          <span className="flex items-center gap-1.5 text-ink-soft"><span className="h-2 w-2 rounded-full" style={{ background: p.color }} />{p.name}</span>
+          <span className="font-semibold tabular-nums text-ink">{format(p.value)}</span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function PerformanceChart({ data, format, symbol }: { data: MonthRow[]; format: (n: number) => string; symbol: string }) {
+  const c = useChartColors();
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const rows = data.map((m) => ({ month: monthLabel(m.month), Sales: m.revenue, Expenses: m.cogs + m.opex, Profit: m.netProfit }));
+  const series = [
+    { key: "Sales", color: c.brand },
+    { key: "Expenses", color: c.muted },
+    { key: "Profit", color: c.strong },
+  ];
+  const toggle = (k: string) => setHidden((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  return (
+    <Panel className="h-full">
+      <PanelHead
+        title="Sales, profit & expenses"
+        href="/dashboard/accounting/profit-loss"
+        linkLabel="P&L"
+      />
+      <div className="mb-3 flex flex-wrap gap-2">
+        {series.map((s) => (
+          <button
+            key={s.key}
+            type="button"
+            onClick={() => toggle(s.key)}
+            aria-pressed={!hidden.has(s.key)}
+            className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition-all", hidden.has(s.key) ? "border-border-soft text-ink-faint" : "border-border-strong text-ink")}
+          >
+            <span className="h-2 w-2 rounded-full transition-opacity" style={{ background: s.color, opacity: hidden.has(s.key) ? 0.3 : 1 }} />
+            {s.key}
+          </button>
+        ))}
+      </div>
+      {rows.length === 0 ? (
+        <p className="py-20 text-center text-sm text-ink-soft">No sales recorded yet.</p>
+      ) : (
+        <div className="h-[260px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={rows} margin={{ top: 8, right: 4, bottom: 0, left: -8 }} barGap={4}>
+              <defs>
+                <linearGradient id="bar-sales" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={c.brand} stopOpacity={1} />
+                  <stop offset="100%" stopColor={c.brand} stopOpacity={0.55} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke={c.grid} strokeDasharray="4 6" vertical={false} />
+              <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fill: c.axis, fontSize: 12 }} />
+              <YAxis tickLine={false} axisLine={false} tick={{ fill: c.axis, fontSize: 11 }} tickFormatter={(v: number) => compact(symbol, v)} width={56} />
+              <Tooltip cursor={{ fill: c.grid, opacity: 0.5, radius: 8 } as object} content={<ChartTooltip format={format} />} />
+              {!hidden.has("Sales") && <Bar dataKey="Sales" fill="url(#bar-sales)" radius={[8, 8, 3, 3]} maxBarSize={26} animationDuration={1100} />}
+              {!hidden.has("Expenses") && <Bar dataKey="Expenses" fill={c.muted} radius={[8, 8, 3, 3]} maxBarSize={26} animationDuration={1100} animationBegin={150} />}
+              {!hidden.has("Profit") && (
+                <Line type="monotone" dataKey="Profit" stroke={c.strong} strokeWidth={2.5} dot={{ r: 3, strokeWidth: 0, fill: c.strong }} activeDot={{ r: 5 }} animationDuration={1500} animationBegin={300} />
+              )}
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function TopProducts({ products, format }: { products: { name: string; total: number }[]; format: (n: number) => string }) {
+  const c = useChartColors();
+  const total = products.reduce((s, p) => s + p.total, 0);
+  const top = products.slice(0, 5);
+  return (
+    <Panel className="flex h-full flex-col">
+      <PanelHead title="Top products" href="/dashboard/reports" linkLabel="Margins" />
+      {top.length === 0 ? (
+        <p className="py-16 text-center text-sm text-ink-soft">No sales in this period.</p>
+      ) : (
+        <>
+          <div className="relative mx-auto h-[170px] w-[170px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={top} dataKey="total" nameKey="name" innerRadius={56} outerRadius={82} paddingAngle={3} cornerRadius={6} stroke="none" animationDuration={1300}>
+                  {top.map((_, i) => <Cell key={i} fill={c.palette[i % c.palette.length]} />)}
+                </Pie>
+                <Tooltip content={<ChartTooltip format={format} />} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Sales</span>
+              <span className="max-w-[110px] truncate text-sm font-bold text-ink"><CountUp value={total} format={format} /></span>
+            </div>
+          </div>
+          <ul className="mt-3 space-y-2">
+            {top.map((p, i) => {
+              const pct = total > 0 ? (p.total / total) * 100 : 0;
+              return (
+                <li key={p.name} className="text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-2"><span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: c.palette[i % c.palette.length] }} /><span className="truncate text-ink">{p.name}</span></span>
+                    <span className="shrink-0 text-xs font-semibold tabular-nums text-ink-soft">{pct.toFixed(0)}%</span>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+    </Panel>
+  );
+}
+
+function NeedsAttention({ summary, format }: { summary: Summary; format: (n: number) => string }) {
+  const tiles: { key: string; label: string; count: number; sub: string; href: string; icon: ReactNode; tone: "danger" | "warning" | "info" }[] = [];
+  if (summary.overdueCount !== null) tiles.push({ key: "overdue", label: "Overdue invoices", count: summary.overdueCount, sub: summary.overdueCount ? "Follow up with customers" : "All paid on time", href: "/dashboard/accounting/receivable", icon: <AlertCircle size={20} />, tone: "danger" });
+  if (summary.supplierUnpaidCount !== null) tiles.push({ key: "supplier", label: "Supplier payments", count: summary.supplierOverdueCount ?? 0, sub: summary.supplierOutstanding ? `${format(summary.supplierOutstanding)} owed` : "Nothing owed", href: "/dashboard/accounting/payable", icon: <Truck size={20} />, tone: (summary.supplierOverdueCount ?? 0) > 0 ? "danger" : "warning" });
+  if (summary.lowStock !== null) tiles.push({ key: "stock", label: "Low stock", count: (summary.lowStock ?? 0) + (summary.outOfStock ?? 0), sub: summary.outOfStock ? `${summary.outOfStock} out of stock` : "At or below reorder level", href: "/dashboard/inventory/products", icon: <PackageX size={20} />, tone: "warning" });
+  if (summary.dueToday !== null) tiles.push({ key: "today", label: "Due today", count: summary.dueToday, sub: summary.expectedToday ? `${format(summary.expectedToday)} expected` : "Nothing due", href: "/dashboard/invoices", icon: <CalendarClock size={20} />, tone: "info" });
+  const tone = {
+    danger: "from-red-400 to-rose-600 shadow-[0_8px_20px_-8px_rgb(225_29_72/0.7)]",
+    warning: "from-amber-300 to-amber-500 shadow-[0_8px_20px_-8px_rgb(245_158_11/0.7)]",
+    info: "from-sky-400 to-blue-600 shadow-[0_8px_20px_-8px_rgb(37_99_235/0.7)]",
+  };
+  if (tiles.length === 0) return null;
+  return (
+    <Panel>
+      <PanelHead title="Needs attention" href="/dashboard/notifications" />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {tiles.map((t, i) => (
+          <motion.div key={t.key} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 + i * 0.07 }}>
+            <Link href={t.href} className="lift group flex h-full flex-col rounded-[20px] border border-border-soft bg-surface-muted p-4">
+              <span className="relative inline-flex w-fit">
+                <span className={cn("flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br text-white", t.count > 0 ? tone[t.tone] : "from-zinc-300 to-zinc-400 dark:from-zinc-600")}>{t.icon}</span>
+                {t.count > 0 && <span className="absolute -right-0.5 -top-0.5 h-3 w-3 animate-ping rounded-full bg-red-500/70" aria-hidden="true" />}
+              </span>
+              <p className="mt-3 text-2xl font-bold tracking-tight text-ink"><CountUp value={t.count} duration={1} /></p>
+              <p className="text-sm font-semibold text-ink">{t.label}</p>
+              <p className="mt-0.5 truncate text-xs text-ink-soft">{t.sub}</p>
+            </Link>
+          </motion.div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function InventoryByStage({ stages, format }: { stages: { raw: number; wip: number; finished: number }; format: (n: number) => string }) {
   const total = stages.raw + stages.wip + stages.finished;
   const parts = [
-    { key: "raw", label: "Raw materials & packaging", value: stages.raw, color: "bg-charcoal" },
-    { key: "wip", label: "Work in progress", value: stages.wip, color: "bg-brand-dark" },
-    { key: "finished", label: "Finished goods", value: stages.finished, color: "bg-brand" },
+    { key: "raw", label: "Raw materials & packaging", value: stages.raw, cls: "from-sky-400 to-blue-600", dot: "bg-blue-500" },
+    { key: "wip", label: "Work in progress", value: stages.wip, cls: "from-violet-400 to-purple-600", dot: "bg-purple-500" },
+    { key: "finished", label: "Finished goods", value: stages.finished, cls: "from-orange-400 to-orange-600", dot: "bg-orange-500" },
   ];
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Inventory by stage</CardTitle>
-          <Link href="/dashboard/inventory/products" className="text-sm text-brand-dark hover:underline">Products</Link>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-2xl font-bold tabular-nums">{format(total)}</p>
-          <div className="flex h-2.5 overflow-hidden rounded-full bg-surface-muted" aria-hidden>
-            {total > 0 && parts.map((p) => (
-              <div key={p.key} className={p.color} style={{ width: `${(p.value / total) * 100}%` }} />
-            ))}
-          </div>
-          <ul className="space-y-2 text-sm">
-            {parts.map((p) => (
-              <li key={p.key} className="flex items-center justify-between gap-3">
-                <span className="flex items-center gap-2 text-ink-soft">
-                  <span className={`h-2.5 w-2.5 rounded-full ${p.color}`} /> {p.label}
-                </span>
-                <span className="tabular-nums font-medium">{format(p.value)}</span>
-              </li>
-            ))}
-          </ul>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Production this month</CardTitle>
-          <Link href="/dashboard/production" className="text-sm text-brand-dark hover:underline">Production</Link>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-3 gap-3 text-sm">
-            <div>
-              <p className="text-ink-soft">Completed</p>
-              <p className="text-xl font-bold tabular-nums">{production.completedOrders}</p>
-            </div>
-            <div>
-              <p className="text-ink-soft">Running</p>
-              <p className="text-xl font-bold tabular-nums">{production.inProgressOrders}</p>
-              {production.draftOrders > 0 && <p className="text-xs text-ink-soft">{production.draftOrders} planned</p>}
-            </div>
-            <div>
-              <p className="text-ink-soft">Cost</p>
-              <p className="text-xl font-bold tabular-nums">{format(production.totalCost)}</p>
-            </div>
-          </div>
-          {production.products.length === 0 ? (
-            <p className="text-sm text-ink-soft">No production completed this month yet.</p>
-          ) : (
-            <ul className="divide-y divide-border-soft text-sm">
-              {production.products.slice(0, 4).map((p) => (
-                <li key={p.name} className="flex items-center justify-between gap-3 py-2">
-                  <span>
-                    <span className="font-medium">{p.name}</span>
-                    <span className="block text-xs text-ink-soft">
-                      {formatQty(p.produced, p.unit)}
-                      {p.yieldPercent !== null ? ` · ${p.yieldPercent}% yield` : ""}
-                    </span>
-                  </span>
-                  <span className="tabular-nums text-ink-soft">{format(p.unitCost)} / {p.unit}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function getGreeting() {
-  const h = new Date().getHours();
-  if (h < 12) return "morning";
-  if (h < 18) return "afternoon";
-  return "evening";
-}
-
-interface KpiCardProps {
-  title: string;
-  value: string;
-  change: string;
-  trend: "up" | "down";
-  icon: React.ReactNode;
-  href: string;
-  accent: "rose" | "charcoal" | "green" | "terracotta";
-}
-
-function KpiCard({ title, value, change, trend, icon, href, accent }: KpiCardProps) {
-  const accents = {
-    rose: "bg-brand-light text-brand-dark",
-    charcoal: "bg-charcoal-light text-charcoal",
-    green: "bg-green-50 text-success",
-    terracotta: "bg-red-50 text-danger",
-  };
-  return (
-    <Link href={href}>
-      <Card className="hover:shadow-md transition-shadow cursor-pointer">
-        <CardContent className="p-5">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-sm text-ink-soft">{title}</p>
-              <p className="text-2xl font-bold mt-1 text-ink">{value}</p>
-            </div>
-            <div className={`p-2 rounded-lg ${accents[accent]}`}>{icon}</div>
-          </div>
-          <div className="flex items-center mt-2">
-            {trend === "up" ? (
-              <ArrowUpRight className="w-4 h-4 text-success" />
-            ) : (
-              <ArrowDownRight className="w-4 h-4 text-danger" />
-            )}
-            <span className={`text-sm ml-1 ${trend === "up" ? "text-success" : "text-danger"}`}>
-              {change}
-            </span>
-          </div>
-        </CardContent>
-      </Card>
-    </Link>
-  );
-}
-
-function QuickAction({
-  label,
-  icon,
-  href,
-}: {
-  label: string;
-  icon: React.ReactNode;
-  href: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="flex flex-col items-center gap-2 p-4 bg-white rounded-xl border border-border-soft hover:border-brand hover:shadow-md transition"
-    >
-      <div className="bg-brand-light p-3 rounded-lg text-brand-dark">{icon}</div>
-      <span className="text-sm font-medium text-ink text-center">{label}</span>
-    </Link>
-  );
-}
-
-function AttentionItem({
-  label,
-  value,
-  variant,
-  href,
-  sublabel,
-}: {
-  label: string;
-  value: string | number;
-  variant: "success" | "warning" | "danger" | "info";
-  href: string;
-  sublabel?: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="flex items-start justify-between gap-3 rounded-lg border border-border-soft p-4 hover:border-brand hover:bg-ivory transition"
-    >
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-ink truncate">{label}</p>
-        {sublabel && (
-          <p className="text-xs text-ink-soft mt-0.5 truncate">{sublabel}</p>
-        )}
+    <Panel className="h-full">
+      <PanelHead title="Inventory by stage" href="/dashboard/inventory/products" />
+      <p className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Stock value at cost</p>
+      <p className="mt-1 text-2xl font-bold tracking-tight text-ink"><CountUp value={total} format={format} /></p>
+      <div className="mt-4 flex h-3 gap-1 overflow-hidden rounded-full bg-surface-muted">
+        {total > 0 && parts.map((p, i) => (
+          <motion.div
+            key={p.key}
+            className={cn("h-full rounded-full bg-gradient-to-r", p.cls)}
+            initial={{ width: 0 }}
+            animate={{ width: `${(p.value / total) * 100}%` }}
+            transition={{ duration: 1.1, delay: 0.3 + i * 0.12, ease: [0.16, 1, 0.3, 1] }}
+          />
+        ))}
       </div>
-      <Badge variant={variant}>{value}</Badge>
-    </Link>
+      <ul className="mt-4 space-y-2.5 text-sm">
+        {parts.map((p) => (
+          <li key={p.key} className="flex items-center justify-between gap-3">
+            <span className="flex items-center gap-2 text-ink-soft"><span className={cn("h-2.5 w-2.5 rounded-full", p.dot)} />{p.label}</span>
+            <span className="font-semibold tabular-nums text-ink"><CountUp value={p.value} format={format} /></span>
+          </li>
+        ))}
+      </ul>
+    </Panel>
   );
 }
 
-function RecentInvoices({
-  version,
-  format,
-}: {
-  version: number;
-  format: (n: number) => string;
-}) {
-  const [invoices, setInvoices] = useState<RecentInvoice[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let active = true;
-    apiFetch<{ success: boolean; data: RecentInvoice[] }>("/dashboard/recent-invoices")
-      .then((r) => {
-        if (active) setInvoices(r.data);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [version]);
-
+function ProductionThisMonth({ production, format }: { production: NonNullable<Summary["production"]>; format: (n: number) => string }) {
+  const all = production.completedOrders + production.inProgressOrders + production.draftOrders;
+  const done = all > 0 ? production.completedOrders / all : 0;
+  const R = 34;
+  const C = 2 * Math.PI * R;
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Recent Invoices</CardTitle>
-        <Link href="/dashboard/invoices">
-          <Button variant="ghost" size="sm">
-            View all
-          </Button>
-        </Link>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <div className="space-y-2">
-            {[...Array(3)].map((_, i) => (
-              <Skeleton key={i} className="h-10" />
-            ))}
+    <Panel className="h-full">
+      <PanelHead title="Production this period" href="/dashboard/production" />
+      <div className="flex items-center gap-5">
+        <div className="relative h-[88px] w-[88px] shrink-0">
+          <svg viewBox="0 0 80 80" className="h-full w-full -rotate-90">
+            <circle cx="40" cy="40" r={R} fill="none" strokeWidth="9" className="stroke-surface-muted" />
+            <motion.circle
+              cx="40" cy="40" r={R} fill="none" strokeWidth="9" strokeLinecap="round" stroke="url(#prod-ring)"
+              strokeDasharray={C}
+              initial={{ strokeDashoffset: C }}
+              animate={{ strokeDashoffset: C * (1 - done) }}
+              transition={{ duration: 1.4, ease: [0.16, 1, 0.3, 1], delay: 0.3 }}
+            />
+            <defs>
+              <linearGradient id="prod-ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#A78BFA" /><stop offset="100%" stopColor="#7C3AED" /></linearGradient>
+            </defs>
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-xl font-bold text-ink"><CountUp value={production.completedOrders} /></span>
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">done</span>
           </div>
-        ) : invoices.length === 0 ? (
-          <p className="text-ink-soft text-center py-4 text-sm">No invoices yet</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left text-ink-soft">
-                <tr>
-                  <th className="pb-2">Invoice</th>
-                  <th className="pb-2">Customer</th>
-                  <th className="pb-2">Amount</th>
-                  <th className="pb-2">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {invoices.map((inv) => (
-                  <tr key={inv.id} className="border-t border-border-soft">
-                    <td className="py-2 font-medium">
-                      <Link
-                        href={`/dashboard/invoices/${inv.id}`}
-                        className="text-brand-dark hover:underline"
-                      >
-                        {inv.invoiceNumber}
-                      </Link>
-                    </td>
-                    <td className="py-2 text-ink-soft">
-                      {inv.customer
-                        ? `${inv.customer.firstName} ${inv.customer.lastName}`
-                        : "—"}
-                    </td>
-                    <td className="py-2 text-ink">{format(inv.total)}</td>
-                    <td className="py-2">
-                      <Badge
-                        variant={
-                          inv.status === "paid"
-                            ? "success"
-                            : inv.status === "overdue"
-                            ? "danger"
-                            : "default"
-                        }
-                      >
-                        {inv.status}
-                      </Badge>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+        </div>
+        <div className="grid flex-1 grid-cols-2 gap-3 text-sm">
+          <div><p className="text-ink-soft">Running</p><p className="text-lg font-bold text-ink"><CountUp value={production.inProgressOrders} /></p></div>
+          <div><p className="text-ink-soft">Planned</p><p className="text-lg font-bold text-ink"><CountUp value={production.draftOrders} /></p></div>
+          <div className="col-span-2"><p className="text-ink-soft">Production cost</p><p className="font-bold text-ink"><CountUp value={production.totalCost} format={format} /></p></div>
+        </div>
+      </div>
+      {production.products.length > 0 ? (
+        <ul className="mt-4 space-y-2.5">
+          {production.products.slice(0, 3).map((p) => (
+            <li key={p.name} className="text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate font-medium text-ink">{p.name}</span>
+                <span className="shrink-0 text-xs text-ink-soft">{formatQty(p.produced, p.unit)} · {format(p.unitCost)}/{p.unit}</span>
+              </div>
+              {p.yieldPercent !== null && (
+                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-muted">
+                  <motion.div className="h-full rounded-full bg-gradient-to-r from-violet-400 to-purple-600" initial={{ width: 0 }} animate={{ width: `${Math.min(100, p.yieldPercent)}%` }} transition={{ duration: 1.1, delay: 0.4 }} />
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-4 flex items-center gap-2 text-sm text-ink-soft"><Factory size={15} /> No runs completed in this period yet.</p>
+      )}
+    </Panel>
   );
 }
 
-function TopCustomers() {
+function initialsOf(name: string) {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
+}
+const AVATAR = ["from-orange-400 to-orange-600", "from-sky-400 to-blue-600", "from-emerald-400 to-green-600", "from-violet-400 to-purple-600", "from-pink-400 to-rose-500", "from-amber-300 to-amber-500"];
+
+function TopCustomers({ rows, format }: { rows: TopCustomer[] | null; format: (n: number) => string }) {
+  const max = Math.max(1, ...(rows ?? []).map((r) => r.sales));
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Top Customers</CardTitle>
-        <Link href="/dashboard/customers">
-          <Button variant="ghost" size="sm">
-            View all
-          </Button>
-        </Link>
-      </CardHeader>
-      <CardContent>
-        <p className="text-ink-soft text-center py-8 text-sm">No data available</p>
-      </CardContent>
-    </Card>
+    <Panel className="h-full">
+      <PanelHead title="Top customers" href="/dashboard/customers" />
+      {rows === null ? (
+        <div className="space-y-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-10" />)}</div>
+      ) : rows.length === 0 ? (
+        <p className="py-10 text-center text-sm text-ink-soft">No customer sales in this period.</p>
+      ) : (
+        <ul className="space-y-3">
+          {rows.map((r, i) => (
+            <li key={r.id}>
+              <Link href={`/dashboard/customers/${r.id}`} className="group flex items-center gap-3">
+                <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-bold text-white", AVATAR[i % AVATAR.length])}>{initialsOf(r.name)}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center justify-between gap-2 text-sm">
+                    <span className="truncate font-semibold text-ink group-hover:text-brand-dark">{r.name}</span>
+                    <span className="shrink-0 font-semibold tabular-nums text-ink"><CountUp value={r.sales} format={format} /></span>
+                  </span>
+                  <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-surface-muted">
+                    <motion.span className={cn("block h-full rounded-full bg-gradient-to-r", AVATAR[i % AVATAR.length])} initial={{ width: 0 }} animate={{ width: `${(r.sales / max) * 100}%` }} transition={{ duration: 1, delay: 0.2 + i * 0.08, ease: [0.16, 1, 0.3, 1] }} />
+                  </span>
+                  {r.outstanding > 0 && <span className="mt-0.5 block text-[11px] text-warning">{format(r.outstanding)} still owed</span>}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
+  );
+}
+
+function RecentInvoices({ rows, format }: { rows: RecentInvoice[] | null; format: (n: number) => string }) {
+  return (
+    <Panel>
+      <PanelHead title="Recent invoices" href="/dashboard/invoices" />
+      {rows === null ? (
+        <div className="space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-12" />)}</div>
+      ) : rows.length === 0 ? (
+        <div className="flex flex-col items-center py-10 text-center text-sm text-ink-soft">
+          <FileText size={22} className="mb-2" /> No invoices yet.
+          <Link href="/dashboard/invoices/new" className="mt-2 font-semibold text-brand-dark hover:underline">Make your first sale</Link>
+        </div>
+      ) : (
+        <ul className="divide-y divide-border-soft">
+          {rows.map((inv, i) => {
+            const name = inv.customer ? `${inv.customer.firstName} ${inv.customer.lastName}` : inv.customerName || "Walk-in customer";
+            return (
+              <motion.li key={inv.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.15 + i * 0.05 }}>
+                <Link href={`/dashboard/invoices/${inv.id}`} className="-mx-2 flex items-center gap-3 rounded-2xl px-2 py-3 transition-colors hover:bg-surface-muted">
+                  <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-xs font-bold text-white", AVATAR[i % AVATAR.length])}>{initialsOf(name)}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-ink">{name}</span>
+                    <span className="block text-xs text-ink-soft">{inv.invoiceNumber} · {new Date(inv.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>
+                  </span>
+                  <span className="hidden sm:block"><StatusBadge status={inv.status} /></span>
+                  <span className="w-28 shrink-0 text-right text-sm font-bold tabular-nums text-ink">{format(inv.total)}</span>
+                </Link>
+              </motion.li>
+            );
+          })}
+        </ul>
+      )}
+    </Panel>
+  );
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="grid gap-5 xl:grid-cols-12">
+      <div className="space-y-5 xl:col-span-4">
+        <Skeleton className="h-64 rounded-[28px]" />
+        <div className="grid grid-cols-2 gap-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-40 rounded-[22px]" />)}</div>
+      </div>
+      <div className="space-y-5 xl:col-span-8">
+        <Skeleton className="h-[380px] rounded-[24px]" />
+        <Skeleton className="h-48 rounded-[24px]" />
+      </div>
+    </div>
   );
 }

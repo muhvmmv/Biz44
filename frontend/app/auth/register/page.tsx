@@ -47,7 +47,7 @@ export default function RegisterPage() {
     >
       <form onSubmit={handleSubmit} className="space-y-5">
         {error && (
-          <div className="bg-[#F4E2E1] border border-danger text-danger px-4 py-3 rounded-lg text-sm">{error}</div>
+          <div className="bg-danger-soft border border-danger text-danger px-4 py-3 rounded-lg text-sm">{error}</div>
         )}
         <div className="grid grid-cols-2 gap-4">
           <div>

@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* `dark:` utilities follow the app theme (<html data-theme="dark">), not the OS. */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
 @theme {
   /* =====================================================================
      Biz44 design tokens. Components use these names, never raw hex values.
@@ -119,3 +122,134 @@
     outline-offset: 2px;
   }
 }
+/* =====================================================================
+   Dark theme. The app sets <html data-theme="dark"> (inside /dashboard);
+   every token above is redefined, so components need no changes.
+   ===================================================================== */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-brand: #FF6A33;
+  --color-brand-dark: #FF9466;        /* orange text, readable on dark */
+  --color-brand-light: rgb(255 106 51 / 0.14);
+
+  /* charcoal = the "strong" colour: near-white on dark (primary buttons,
+     active pills, headings) */
+  --color-charcoal: #F4F4F5;
+  --color-charcoal-dark: #FFFFFF;
+  --color-charcoal-light: #26262D;
+
+  --color-ivory: #0B0B0E;
+  --color-surface: #141418;
+  --color-surface-muted: #1B1B20;
+  --color-border-soft: #26262D;
+  --color-border-strong: #383841;
+
+  --color-ink: #F2F2F4;
+  --color-ink-soft: #A1A1AA;
+  --color-ink-faint: #71717A;
+
+  --color-success: #4ADE80;
+  --color-success-soft: rgb(34 197 94 / 0.14);
+  --color-warning: #FBBF24;
+  --color-warning-soft: rgb(245 158 11 / 0.14);
+  --color-danger: #F87171;
+  --color-danger-soft: rgb(239 68 68 / 0.14);
+  --color-info: #60A5FA;
+  --color-info-soft: rgb(59 130 246 / 0.15);
+
+  --color-chart-2: #E4E4E7;
+  --color-chart-5: #52525B;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 0 0 1px rgb(255 255 255 / 0.02);
+  --shadow-raised: 0 8px 20px -6px rgb(0 0 0 / 0.6);
+  --shadow-pop: 0 24px 60px -12px rgb(0 0 0 / 0.75), 0 0 0 1px rgb(255 255 255 / 0.04);
+}
+
+/* Older screens that still name colours directly. */
+:root[data-theme="dark"] .bg-white { background-color: var(--color-surface); }
+:root[data-theme="dark"] .hover\:bg-white:hover { background-color: var(--color-surface-muted); }
+/* Strong surfaces (primary buttons, active pills) are light in dark mode,
+   so their white text turns dark. */
+:root[data-theme="dark"] .bg-charcoal.text-white,
+:root[data-theme="dark"] .bg-charcoal .text-white { color: #0B0B0E; }
+:root[data-theme="dark"] .bg-charcoal .text-white\/70 { color: rgb(11 11 14 / 0.7); }
+:root[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1) opacity(0.7); }
+
+/* Smooth colour change when switching theme (not on first paint). */
+:root.theme-transition,
+:root.theme-transition *,
+:root.theme-transition *::before,
+:root.theme-transition *::after {
+  transition: background-color 350ms ease, border-color 350ms ease, color 250ms ease, fill 350ms ease, stroke 350ms ease !important;
+}
+
+/* =====================================================================
+   Glass surfaces (sidebar, floating panels) and ambient background
+   ===================================================================== */
+:root {
+  --glass-bg: rgb(255 255 255 / 0.62);
+  --glass-strong: rgb(255 255 255 / 0.82);
+  --glass-border: rgb(255 255 255 / 0.7);
+  --glass-edge: rgb(16 16 20 / 0.06);
+  --glass-shadow: 0 20px 50px -20px rgb(16 16 20 / 0.25), 0 2px 6px -2px rgb(16 16 20 / 0.08);
+  --ambient-1: rgb(240 90 40 / 0.10);
+  --ambient-2: rgb(59 130 246 / 0.06);
+}
+:root[data-theme="dark"] {
+  --glass-bg: rgb(28 28 34 / 0.62);
+  --glass-strong: rgb(30 30 36 / 0.86);
+  --glass-border: rgb(255 255 255 / 0.08);
+  --glass-edge: rgb(0 0 0 / 0.4);
+  --glass-shadow: 0 24px 60px -18px rgb(0 0 0 / 0.8), 0 0 0 1px rgb(255 255 255 / 0.03);
+  --ambient-1: rgb(255 106 51 / 0.10);
+  --ambient-2: rgb(99 102 241 / 0.07);
+}
+
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 rgb(255 255 255 / 0.35);
+}
+:root[data-theme="dark"] .glass { box-shadow: var(--glass-shadow), inset 0 1px 0 rgb(255 255 255 / 0.05); }
+.glass-strong {
+  background: var(--glass-strong);
+  backdrop-filter: blur(24px) saturate(170%);
+  -webkit-backdrop-filter: blur(24px) saturate(170%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+
+/* Soft brand glow behind the app (fixed, never scrolls). */
+.ambient-bg {
+  background:
+    radial-gradient(60rem 40rem at 85% -10%, var(--ambient-1), transparent 60%),
+    radial-gradient(50rem 40rem at -10% 110%, var(--ambient-2), transparent 60%),
+    var(--color-ivory);
+}
+
+/* App-icon tiles in the sidebar */
+.app-icon {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.35), inset 0 -2px 4px rgb(0 0 0 / 0.12), 0 4px 10px -4px rgb(0 0 0 / 0.35);
+}
+
+/* Orange hero card: layered gradient with a soft sheen */
+.brand-card {
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgb(255 255 255 / 0.28), transparent 45%),
+    radial-gradient(90% 80% at 0% 100%, rgb(150 40 0 / 0.35), transparent 60%),
+    linear-gradient(135deg, #FF8A4C 0%, #F05A28 45%, #D9420F 100%);
+}
+
+/* Subtle lift for interactive cards */
+.lift { transition: transform 200ms cubic-bezier(.2,.8,.2,1), box-shadow 200ms ease; }
+.lift:hover { transform: translateY(-2px); box-shadow: var(--shadow-raised); }
+
+@media (prefers-reduced-motion: reduce) {
+  .lift:hover { transform: none; }
+}
+
+/* Scroll without a visible scrollbar (sidebar lists). */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

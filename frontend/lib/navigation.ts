@@ -23,6 +23,8 @@ export interface NavLeaf {
 export interface NavItem {
   name: string;
   icon: LucideIcon;
+  /** App-icon gradient for the sidebar tile (full Tailwind class names). */
+  tint?: string;
   area?: Area;
   need?: Access;
   href?: string;
@@ -38,14 +40,14 @@ export interface NavSection {
 export const NAV: NavSection[] = [
   {
     label: "Overview",
-    items: [{ name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, keywords: ["home", "analytics"] }],
+    items: [{ name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, tint: "from-orange-400 to-orange-600", keywords: ["home", "analytics"] }],
   },
   {
     label: "Business operations",
     items: [
       {
         name: "Inventory",
-        icon: Package,
+        icon: Package, tint: "from-sky-400 to-blue-600",
         children: [
           { name: "Overview", href: "/dashboard/inventory", area: "inventory" },
           { name: "Products", href: "/dashboard/inventory/products", area: "inventory", keywords: ["items", "raw materials", "finished goods"] },
@@ -56,7 +58,7 @@ export const NAV: NavSection[] = [
       },
       {
         name: "Purchasing",
-        icon: ShoppingCart,
+        icon: ShoppingCart, tint: "from-amber-300 to-amber-500",
         children: [
           { name: "Purchases", href: "/dashboard/purchases", area: "purchasing", keywords: ["orders", "bills"] },
           { name: "Receive goods", href: "/dashboard/inventory/receive", area: "purchasing", need: "write", keywords: ["receive inventory", "delivery"] },
@@ -66,7 +68,7 @@ export const NAV: NavSection[] = [
       },
       {
         name: "Production",
-        icon: Factory,
+        icon: Factory, tint: "from-violet-400 to-purple-600",
         children: [
           { name: "Production orders", href: "/dashboard/production", area: "inventory", keywords: ["manufacturing", "make", "batch", "run", "mo"] },
           { name: "Bills of materials", href: "/dashboard/production/boms", area: "inventory", keywords: ["bom", "recipe", "formula", "materials"] },
@@ -74,24 +76,24 @@ export const NAV: NavSection[] = [
       },
       {
         name: "Sales",
-        icon: Receipt,
+        icon: Receipt, tint: "from-emerald-400 to-green-600",
         children: [
           { name: "Invoices", href: "/dashboard/invoices", area: "sales", keywords: ["sales", "bills"] },
           { name: "Payments received", href: "/dashboard/payments", area: "sales", keywords: ["customer payments"] },
           { name: "Receivables", href: "/dashboard/accounting/receivable", area: "sales", keywords: ["accounts receivable", "debtors", "owed"] },
         ],
       },
-      { name: "Customers", href: "/dashboard/customers", area: "sales", icon: Users, keywords: ["clients", "buyers"] },
+      { name: "Customers", href: "/dashboard/customers", area: "sales", icon: Users, tint: "from-pink-400 to-rose-500", keywords: ["clients", "buyers"] },
     ],
   },
   {
     label: "Financial management",
     items: [
-      { name: "Expenses", href: "/dashboard/accounting/expenses", area: "money", icon: Wallet, keywords: ["costs", "spending"] },
-      { name: "Cash & Banks", href: "/dashboard/accounting/accounts", area: "money", icon: Landmark, keywords: ["bank accounts", "cash management", "transfers", "owner"] },
+      { name: "Expenses", href: "/dashboard/accounting/expenses", area: "money", icon: Wallet, tint: "from-red-400 to-rose-600", keywords: ["costs", "spending"] },
+      { name: "Cash & Banks", href: "/dashboard/accounting/accounts", area: "money", icon: Landmark, tint: "from-teal-300 to-teal-600", keywords: ["bank accounts", "cash management", "transfers", "owner"] },
       {
         name: "Accounting",
-        icon: Calculator,
+        icon: Calculator, tint: "from-indigo-400 to-indigo-600",
         children: [
           { name: "Overview", href: "/dashboard/accounting", area: "money" },
           { name: "Journal", href: "/dashboard/accounting/journal", area: "money", keywords: ["ledger", "entries"] },
@@ -107,7 +109,7 @@ export const NAV: NavSection[] = [
     items: [
       {
         name: "Employees",
-        icon: Briefcase,
+        icon: Briefcase, tint: "from-cyan-400 to-cyan-600",
         children: [
           { name: "Employees", href: "/dashboard/employees", area: "hr", keywords: ["staff"] },
           { name: "Payroll", href: "/dashboard/payroll", area: "payroll", keywords: ["salaries", "wages"] },
@@ -115,10 +117,10 @@ export const NAV: NavSection[] = [
           { name: "Leave", href: "/dashboard/leave", area: "hr", keywords: ["holiday", "time off"] },
         ],
       },
-      { name: "Reports", href: "/dashboard/reports", area: "reports", icon: FileText },
+      { name: "Reports", href: "/dashboard/reports", area: "reports", icon: FileText, tint: "from-lime-400 to-green-500" },
       {
         name: "Settings",
-        icon: Settings,
+        icon: Settings, tint: "from-zinc-400 to-zinc-600",
         children: [
           { name: "Company", href: "/dashboard/settings", area: "settings", need: "write", keywords: ["currency", "business"] },
           { name: "Locations", href: "/dashboard/settings/locations", area: "settings", need: "write", keywords: ["branches", "factory", "stores"] },

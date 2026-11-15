@@ -1,210 +1,608 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
-import { NavItem, matchNav, visibleNav } from "@/lib/navigation";
+import { useRouter } from "next/navigation";
+import {
+  AnimatePresence, motion, useMotionValue, useReducedMotion, useSpring, useTransform, type MotionValue,
+} from "framer-motion";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, LogOut, Moon, Search, Sun, UserRound } from "lucide-react";
+import { NavItem, NavLeaf, matchNav, visibleNav } from "@/lib/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { useTheme } from "@/hooks/useTheme";
+import { navBadges, useAlerts } from "@/hooks/useAlerts";
+import { ROLE_LABELS } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
 interface SidebarProps {
   pathname: string;
+  /** Desktop: true = the floating icon rail, false = the full panel. */
   collapsed: boolean;
   onToggleCollapsed: () => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
+  onOpenSearch: () => void;
 }
 
+const spring = { type: "spring" as const, stiffness: 320, damping: 32, mass: 0.9 };
+export const RAIL_WIDTH = 76;
+export const PANEL_WIDTH = 284;
+
 /**
- * Grouped navigation. Desktop: full width or a collapsed icon rail.
- * Phones and tablets: a drawer opened from the header.
+ * Floating glass sidebar.
+ *  - Rail: colourful app-icon tiles that magnify under the pointer (dock
+ *    style), with a name tooltip and badge; a group's pages pop out beside it.
+ *  - Panel: the arrow opens the full sidebar with sections, search, badges,
+ *    the theme switch and the account card.
+ *  - Phones/tablets: the panel slides in as a drawer.
  */
-export default function Sidebar({ pathname, collapsed, onToggleCollapsed, mobileOpen, onCloseMobile }: SidebarProps) {
-  const active = matchNav(pathname);
-  // The group holding the current page is open unless the user closed it;
-  // other groups are closed unless the user opened them.
+export default function Sidebar({ pathname, collapsed, onToggleCollapsed, mobileOpen, onCloseMobile, onOpenSearch }: SidebarProps) {
   const { user } = useAuth();
   const nav = visibleNav(user?.permissions);
-  const [opened, setOpened] = useState<Set<string>>(() => new Set());
-  const [closed, setClosed] = useState<Set<string>>(() => new Set());
-  const isOpen = (name: string) => (active?.item.name === name ? !closed.has(name) : opened.has(name));
-
-  const toggleGroup = (name: string) => {
-    const flip = (set: Set<string>) => {
-      const next = new Set(set);
-      if (next.has(name)) next.delete(name); else next.add(name);
-      return next;
-    };
-    if (collapsed) {
-      // In the rail, a group expands the sidebar and opens.
-      onToggleCollapsed();
-      setOpened((s) => new Set(s).add(name));
-      setClosed((s) => { const n = new Set(s); n.delete(name); return n; });
-      return;
-    }
-    if (active?.item.name === name) setClosed(flip);
-    else setOpened(flip);
-  };
-
-  // The rail only applies on desktop; the mobile drawer is always full width.
-  const rail = collapsed && !mobileOpen;
+  const active = matchNav(pathname);
+  const badges = navBadges(useAlerts(pathname));
 
   return (
     <>
-      {mobileOpen && (
-        <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[1px] lg:hidden" onClick={onCloseMobile} aria-hidden="true" />
-      )}
-      <aside
+      {/* Desktop */}
+      <motion.aside
         aria-label="Main navigation"
-        className={cn(
-          "fixed inset-y-0 left-0 z-50 flex flex-col border-r border-border-soft bg-surface transition-[transform,width] duration-200 ease-out",
-          "lg:static lg:z-auto lg:translate-x-0",
-          mobileOpen ? "translate-x-0 w-sidebar shadow-pop" : "-translate-x-full",
-          rail ? "lg:w-sidebar-collapsed" : "lg:w-sidebar"
-        )}
+        initial={false}
+        animate={{ width: collapsed ? RAIL_WIDTH : PANEL_WIDTH }}
+        transition={spring}
+        className="glass fixed bottom-3 left-3 top-3 z-40 hidden flex-col rounded-[28px] lg:flex"
       >
-        {/* Brand */}
-        <div className={cn("flex h-header shrink-0 items-center border-b border-border-soft", rail ? "justify-center px-2" : "justify-between px-5")}>
-          <Link href="/dashboard" className="flex items-center gap-2.5" onClick={onCloseMobile} aria-label="Biz44 home">
-            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-brand text-sm font-extrabold text-white shadow-raised">B</span>
-            {!rail && <span className="text-lg font-bold tracking-tight text-ink">Biz44</span>}
-          </Link>
-          <button onClick={onCloseMobile} className="rounded-lg p-1.5 text-ink-soft hover:bg-ivory hover:text-ink lg:hidden" aria-label="Close menu">
-            <X size={18} />
-          </button>
-        </div>
+        {collapsed ? (
+          <Rail nav={nav} active={active} badges={badges} onExpand={onToggleCollapsed} onOpenSearch={onOpenSearch} />
+        ) : (
+          <Panel nav={nav} active={active} badges={badges} onCollapse={onToggleCollapsed} onOpenSearch={onOpenSearch} onNavigate={() => {}} />
+        )}
+      </motion.aside>
 
-        {/* Navigation */}
-        <nav className={cn("flex-1 overflow-y-auto py-4", rail ? "px-2" : "px-3")}>
-          {nav.map((section, si) => (
-            <div key={section.label} className={cn(si > 0 && "mt-5")}>
-              {rail ? (
-                si > 0 && <div className="mx-3 mb-3 h-px bg-border-soft" aria-hidden="true" />
-              ) : (
-                <p className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-wider text-ink-soft">{section.label}</p>
-              )}
-              <ul className="space-y-0.5">
-                {section.items.map((item) => (
-                  <li key={item.name}>
-                    <NavEntry
-                      item={item}
-                      rail={rail}
-                      isOpen={isOpen(item.name)}
-                      activeHref={active?.href}
-                      activeItem={active?.item.name}
-                      onToggle={() => toggleGroup(item.name)}
-                      onNavigate={onCloseMobile}
-                    />
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </nav>
-
-        {/* Collapse control (desktop) */}
-        <div className="hidden shrink-0 border-t border-border-soft p-3 lg:block">
-          <button
-            onClick={onToggleCollapsed}
-            className={cn(
-              "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-ink-soft transition-colors hover:bg-ivory hover:text-ink",
-              rail && "justify-center px-0"
-            )}
-            aria-label={rail ? "Expand sidebar" : "Collapse sidebar"}
-            title={rail ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {rail ? <PanelLeftOpen size={18} /> : <><PanelLeftClose size={18} /> Collapse</>}
-          </button>
-        </div>
-      </aside>
+      {/* Phones and tablets */}
+      <AnimatePresence>
+        {mobileOpen && (
+          <>
+            <motion.div
+              key="backdrop"
+              className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] lg:hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={onCloseMobile}
+              aria-hidden="true"
+            />
+            <motion.aside
+              key="drawer"
+              aria-label="Main navigation"
+              className="glass-strong fixed bottom-3 left-3 top-3 z-50 flex w-[min(284px,calc(100vw-24px))] flex-col rounded-[28px] lg:hidden"
+              initial={{ x: -320, opacity: 0.6 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -320, opacity: 0.6 }}
+              transition={spring}
+            >
+              <Panel nav={nav} active={active} badges={badges} onCollapse={onCloseMobile} onOpenSearch={() => { onCloseMobile(); onOpenSearch(); }} onNavigate={onCloseMobile} mobile />
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
     </>
   );
 }
 
-const rowBase =
-  "group relative flex w-full items-center gap-3 rounded-xl text-sm font-medium transition-colors " +
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand";
+type Active = ReturnType<typeof matchNav>;
 
-function NavEntry({
-  item, rail, isOpen, activeHref, activeItem, onToggle, onNavigate,
-}: {
-  item: NavItem;
-  rail: boolean;
-  isOpen: boolean;
-  activeHref?: string;
-  activeItem?: string;
-  onToggle: () => void;
-  onNavigate: () => void;
+function LogoTile({ size = 44 }: { size?: number }) {
+  return (
+    <span
+      className="app-icon flex shrink-0 items-center justify-center rounded-[14px] bg-gradient-to-br from-orange-400 via-orange-500 to-orange-700 font-extrabold tracking-tight text-white"
+      style={{ width: size, height: size, fontSize: size * 0.32 }}
+      aria-hidden="true"
+    >
+      B44
+    </span>
+  );
+}
+
+function initials(first?: string, last?: string) {
+  return `${first?.[0] ?? ""}${last?.[0] ?? ""}`.toUpperCase() || "?";
+}
+
+// =====================================================================
+// Rail
+// =====================================================================
+interface Pop { kind: "tooltip" | "menu"; key: string; top: number; label: string; badge?: number; leaves?: NavLeaf[]; tint?: string; Icon?: NavItem["icon"] }
+
+function Rail({ nav, active, badges, onExpand, onOpenSearch }: {
+  nav: ReturnType<typeof visibleNav>; active: Active; badges: Record<string, number>; onExpand: () => void; onOpenSearch: () => void;
 }) {
-  const Icon = item.icon;
-  const containsActive = activeItem === item.name;
+  const router = useRouter();
+  const { user, logout } = useAuth();
+  const { theme, toggle } = useTheme();
+  const mouseY = useMotionValue(Infinity);
+  const [pop, setPop] = useState<Pop | null>(null);
+  const railRef = useRef<HTMLDivElement>(null);
 
-  if (!item.children) {
-    const isActive = activeHref === item.href;
-    return (
-      <Link
-        href={item.href!}
-        onClick={onNavigate}
-        aria-current={isActive ? "page" : undefined}
-        title={rail ? item.name : undefined}
-        className={cn(
-          rowBase,
-          rail ? "h-10 justify-center" : "h-10 px-3",
-          isActive ? "bg-brand-light text-brand-dark" : "text-ink-soft hover:bg-ivory hover:text-ink"
-        )}
-      >
-        {isActive && !rail && <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-brand" aria-hidden="true" />}
-        <Icon size={18} className={cn(isActive ? "text-brand" : "text-ink-soft group-hover:text-ink")} />
-        {!rail && <span className="truncate">{item.name}</span>}
-      </Link>
-    );
-  }
+  // Close an open pop-out menu on outside click or Escape.
+  useEffect(() => {
+    if (pop?.kind !== "menu") return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (!t.closest("[data-rail-pop]") && !t.closest("[data-rail-icon]")) setPop(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setPop(null); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [pop?.kind]);
+
+  const show = (p: Pop) => setPop((cur) => (cur?.kind === "menu" && p.kind === "tooltip" ? cur : p));
+  const hideTooltip = () => setPop((cur) => (cur?.kind === "tooltip" ? null : cur));
+  const rect = (el: HTMLElement) => el.getBoundingClientRect();
 
   return (
-    <>
+    <div ref={railRef} className="relative flex h-full flex-col items-center py-4">
+      {/* Brand + expand arrow */}
+      <Link href="/dashboard" aria-label="Biz44 home" className="relative">
+        <LogoTile />
+      </Link>
+      <motion.button
+        type="button"
+        onClick={onExpand}
+        aria-label="Open sidebar"
+        whileHover={{ scale: 1.12 }}
+        whileTap={{ scale: 0.92 }}
+        className="glass-strong absolute -right-3 top-6 flex h-7 w-7 items-center justify-center rounded-full text-ink-soft hover:text-ink"
+      >
+        <ChevronRight size={15} />
+      </motion.button>
+
       <button
         type="button"
-        onClick={onToggle}
-        aria-expanded={rail ? undefined : isOpen}
-        title={rail ? item.name : undefined}
+        onClick={onOpenSearch}
+        data-rail-icon
+        aria-label="Search"
+        onMouseEnter={(e) => show({ kind: "tooltip", key: "search", top: rect(e.currentTarget).top + rect(e.currentTarget).height / 2, label: "Search  ⌘K" })}
+        onMouseLeave={hideTooltip}
+        className="mt-4 flex h-10 w-10 items-center justify-center rounded-[13px] border border-border-soft bg-surface/80 text-ink-soft shadow-card transition-colors hover:text-ink"
+      >
+        <Search size={17} />
+      </button>
+      <div className="my-3 h-px w-8 bg-border-soft" aria-hidden="true" />
+
+      {/* Apps */}
+      <nav
+        className="no-scrollbar flex w-full flex-1 flex-col items-center gap-1.5 overflow-y-auto overflow-x-hidden px-2 py-1"
+        onMouseMove={(e) => mouseY.set(e.clientY)}
+        onMouseLeave={() => { mouseY.set(Infinity); hideTooltip(); }}
+      >
+        {nav.map((section, si) => (
+          <div key={section.label} className="flex flex-col items-center gap-1.5">
+            {si > 0 && <div className="my-1.5 h-px w-6 bg-border-soft" aria-hidden="true" />}
+            {section.items.map((item) => {
+              const isActive = active?.item.name === item.name;
+              const badge = badges[item.name] ?? 0;
+              return (
+                <DockIcon
+                  key={item.name}
+                  item={item}
+                  mouseY={mouseY}
+                  active={isActive}
+                  badge={badge}
+                  open={pop?.kind === "menu" && pop.key === item.name}
+                  onHover={(el) => show({ kind: "tooltip", key: item.name, top: rect(el).top + rect(el).height / 2, label: item.name, badge })}
+                  onLeave={hideTooltip}
+                  onClick={(el) => {
+                    if (item.children) {
+                      setPop((cur) => (cur?.kind === "menu" && cur.key === item.name ? null : {
+                        kind: "menu", key: item.name, top: rect(el).top, label: item.name, leaves: item.children, tint: item.tint, Icon: item.icon,
+                      }));
+                    } else if (item.href) {
+                      setPop(null);
+                      router.push(item.href);
+                    }
+                  }}
+                />
+              );
+            })}
+          </div>
+        ))}
+      </nav>
+
+      {/* Theme + account */}
+      <div className="mt-3 flex flex-col items-center gap-2.5">
+        <button
+          type="button"
+          onClick={toggle}
+          data-rail-icon
+          aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          onMouseEnter={(e) => show({ kind: "tooltip", key: "theme", top: rect(e.currentTarget).top + rect(e.currentTarget).height / 2, label: theme === "dark" ? "Light mode" : "Dark mode" })}
+          onMouseLeave={hideTooltip}
+          className="app-icon flex h-10 w-10 items-center justify-center overflow-hidden rounded-[13px] bg-gradient-to-br from-sky-400 to-indigo-600 text-white"
+        >
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.span key={theme} initial={{ rotate: -90, scale: 0.4, opacity: 0 }} animate={{ rotate: 0, scale: 1, opacity: 1 }} exit={{ rotate: 90, scale: 0.4, opacity: 0 }} transition={{ duration: 0.25 }}>
+              {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+            </motion.span>
+          </AnimatePresence>
+        </button>
+        <button
+          type="button"
+          data-rail-icon
+          aria-label="Account"
+          onClick={(e) => {
+            const r = rect(e.currentTarget);
+            setPop((cur) => (cur?.kind === "menu" && cur.key === "account" ? null : { kind: "menu", key: "account", top: r.top - 60, label: "Account" }));
+          }}
+          className="relative flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-zinc-700 to-zinc-900 text-xs font-bold text-white ring-2 ring-surface"
+        >
+          {initials(user?.firstName, user?.lastName)}
+          <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-green-500 ring-2 ring-surface" aria-hidden="true" />
+        </button>
+      </div>
+
+      {/* Tooltips and pop-out menus (fixed, so the scrolling list doesn't clip them) */}
+      <AnimatePresence>
+        {pop?.kind === "tooltip" && (
+          <motion.div
+            key={`tip-${pop.key}`}
+            initial={{ opacity: 0, x: -6, scale: 0.96 }}
+            animate={{ opacity: 1, x: 0, scale: 1 }}
+            exit={{ opacity: 0, x: -6, scale: 0.96 }}
+            transition={{ duration: 0.14 }}
+            className="glass-strong pointer-events-none fixed z-[60] flex -translate-y-1/2 items-center gap-2 rounded-full px-3 py-1.5 text-sm font-semibold text-ink"
+            style={{ top: pop.top, left: RAIL_WIDTH + 22 }}
+            role="tooltip"
+          >
+            {pop.label}
+            {!!pop.badge && <span className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-semibold text-ink-soft">{pop.badge} new</span>}
+          </motion.div>
+        )}
+        {pop?.kind === "menu" && pop.leaves && (
+          <motion.div
+            key={`menu-${pop.key}`}
+            data-rail-pop
+            className="fixed z-[60] flex flex-col items-start gap-2"
+            style={{ top: Math.max(12, Math.min(pop.top - 6, window.innerHeight - pop.leaves.length * 52 - 12)), left: RAIL_WIDTH + 24 }}
+            initial="hidden"
+            animate="show"
+            exit="hidden"
+            variants={{ show: { transition: { staggerChildren: 0.045 } }, hidden: { transition: { staggerChildren: 0.03, staggerDirection: -1 } } }}
+          >
+            {pop.leaves.map((leaf, i) => {
+              const isActive = active?.href === leaf.href;
+              const Icon = pop.Icon!;
+              return (
+                <motion.div
+                  key={leaf.href}
+                  variants={{
+                    hidden: { opacity: 0, x: -14, scale: 0.9, rotate: -2 },
+                    show: { opacity: 1, x: i % 2 ? 6 : 0, scale: 1, rotate: i % 2 ? 1.5 : -1, transition: spring },
+                  }}
+                >
+                  <Link
+                    href={leaf.href}
+                    onClick={() => setPop(null)}
+                    className={cn(
+                      "glass-strong flex items-center gap-3 rounded-2xl py-2 pl-2 pr-5 text-sm font-semibold text-ink transition-transform hover:-translate-y-0.5 hover:rotate-0",
+                      isActive && "ring-2 ring-brand/60"
+                    )}
+                  >
+                    <span className={cn("app-icon flex h-8 w-8 items-center justify-center rounded-[10px] bg-gradient-to-br text-white", pop.tint)}>
+                      <Icon size={15} />
+                    </span>
+                    {leaf.name}
+                  </Link>
+                </motion.div>
+              );
+            })}
+          </motion.div>
+        )}
+        {pop?.kind === "menu" && pop.key === "account" && (
+          <AccountPop key="account" top={pop.top} onClose={() => setPop(null)} onLogout={logout} />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function AccountPop({ top, onClose, onLogout }: { top: number; onClose: () => void; onLogout: () => void }) {
+  const { user } = useAuth();
+  return (
+    <motion.div
+      data-rail-pop
+      initial={{ opacity: 0, x: -10, scale: 0.95 }}
+      animate={{ opacity: 1, x: 0, scale: 1 }}
+      exit={{ opacity: 0, x: -10, scale: 0.95 }}
+      transition={spring}
+      className="glass-strong fixed z-[60] w-60 rounded-2xl p-2"
+      style={{ top, left: RAIL_WIDTH + 24 }}
+    >
+      <div className="px-2 pb-2 pt-1">
+        <p className="truncate text-sm font-semibold text-ink">{user?.firstName} {user?.lastName}</p>
+        <p className="truncate text-xs text-ink-soft">{user?.email}</p>
+      </div>
+      <Link href="/dashboard/profile" onClick={onClose} className="flex items-center gap-2 rounded-xl px-2 py-2 text-sm text-ink hover:bg-surface-muted"><UserRound size={15} /> Your profile</Link>
+      <button type="button" onClick={() => { onClose(); onLogout(); }} className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-sm text-danger hover:bg-danger-soft"><LogOut size={15} /> Sign out</button>
+    </motion.div>
+  );
+}
+
+/** A rail tile that grows as the pointer gets close (like a dock). */
+function DockIcon({ item, mouseY, active, badge, open, onHover, onLeave, onClick }: {
+  item: NavItem; mouseY: MotionValue<number>; active: boolean; badge: number; open: boolean;
+  onHover: (el: HTMLElement) => void; onLeave: () => void; onClick: (el: HTMLElement) => void;
+}) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const reduce = useReducedMotion();
+  const distance = useTransform(mouseY, (y) => {
+    const r = ref.current?.getBoundingClientRect();
+    return r ? y - (r.top + r.height / 2) : Infinity;
+  });
+  const sizeRaw = useTransform(distance, [-110, 0, 110], [44, reduce ? 44 : 56, 44]);
+  const size = useSpring(sizeRaw, { stiffness: 380, damping: 26, mass: 0.2 });
+  const iconSize = useTransform(size, [44, 56], [19, 24]);
+  const Icon = item.icon;
+
+  const handle = useCallback(() => ref.current && onClick(ref.current), [onClick]);
+
+  return (
+    <div className="relative flex w-full items-center justify-center">
+      {/* Active marker */}
+      <AnimatePresence>
+        {active && (
+          <motion.span
+            layoutId="rail-active"
+            className="absolute left-0 h-1.5 w-1.5 rounded-full bg-ink"
+            initial={{ opacity: 0, scale: 0 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0 }}
+            aria-hidden="true"
+          />
+        )}
+      </AnimatePresence>
+      <motion.button
+        ref={ref}
+        type="button"
+        data-rail-icon
+        aria-label={item.name}
+        aria-current={active ? "page" : undefined}
+        aria-expanded={item.children ? open : undefined}
+        onClick={handle}
+        onMouseEnter={(e) => onHover(e.currentTarget)}
+        onMouseLeave={onLeave}
+        onFocus={(e) => onHover(e.currentTarget)}
+        onBlur={onLeave}
+        whileTap={{ scale: 0.9 }}
+        style={{ width: size, height: size }}
         className={cn(
-          rowBase,
-          rail ? "h-10 justify-center" : "h-10 px-3",
-          containsActive ? "text-ink" : "text-ink-soft hover:bg-ivory hover:text-ink",
-          rail && containsActive && "bg-brand-light"
+          "app-icon relative flex shrink-0 items-center justify-center rounded-[14px] bg-gradient-to-br text-white outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2",
+          item.tint ?? "from-zinc-400 to-zinc-600",
+          (active || open) && "ring-2 ring-white/70 ring-offset-0"
         )}
       >
-        <Icon size={18} className={cn(containsActive ? "text-brand" : "text-ink-soft group-hover:text-ink")} />
-        {!rail && (
-          <>
-            <span className="flex-1 truncate text-left">{item.name}</span>
-            <ChevronDown size={15} className={cn("text-ink-soft transition-transform", isOpen && "rotate-180")} />
-          </>
+        <motion.span style={{ width: iconSize, height: iconSize }} className="flex items-center justify-center">
+          <Icon className="h-full w-full" strokeWidth={2.1} />
+        </motion.span>
+        <AnimatePresence>
+          {badge > 0 && (
+            <motion.span
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0 }}
+              transition={{ type: "spring", stiffness: 500, damping: 18 }}
+              className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow ring-2 ring-white/80"
+            >
+              {badge > 99 ? "99+" : badge}
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </motion.button>
+    </div>
+  );
+}
+
+// =====================================================================
+// Panel (expanded)
+// =====================================================================
+function Panel({ nav, active, badges, onCollapse, onOpenSearch, onNavigate, mobile }: {
+  nav: ReturnType<typeof visibleNav>; active: Active; badges: Record<string, number>;
+  onCollapse: () => void; onOpenSearch: () => void; onNavigate: () => void; mobile?: boolean;
+}) {
+  const { user, logout } = useAuth();
+  const { theme, setTheme } = useTheme();
+  const [open, setOpen] = useState<Set<string>>(() => new Set(active?.leaf ? [active.item.name] : []));
+  const [accountOpen, setAccountOpen] = useState(false);
+  const toggleGroup = (name: string) => setOpen((s) => { const n = new Set(s); if (n.has(name)) n.delete(name); else n.add(name); return n; });
+
+  return (
+    <motion.div
+      className="relative flex h-full min-w-0 flex-col"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1, transition: { delay: mobile ? 0 : 0.08, duration: 0.2 } }}
+    >
+      {/* Workspace header */}
+      <div className="flex items-center gap-3 px-4 pb-3 pt-4">
+        <Link href="/dashboard" onClick={onNavigate} aria-label="Biz44 home"><LogoTile size={42} /></Link>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[15px] font-bold leading-tight text-ink">{user?.companyName || "Biz44"}</p>
+          <p className="truncate text-xs text-ink-soft">Biz44 workspace</p>
+        </div>
+        {user?.role && (
+          <span className="rounded-full bg-gradient-to-br from-orange-400 to-orange-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
+            {user.role === "admin" ? "Admin" : ROLE_LABELS[user.role] ?? user.role}
+          </span>
         )}
-      </button>
-      {!rail && isOpen && (
-        <ul className="mb-1 ml-[21px] mt-0.5 space-y-0.5 border-l border-border-soft pl-3">
-          {item.children.map((leaf) => {
-            const isActive = activeHref === leaf.href;
-            return (
-              <li key={leaf.href}>
-                <Link
-                  href={leaf.href}
-                  onClick={onNavigate}
-                  aria-current={isActive ? "page" : undefined}
-                  className={cn(
-                    "relative block rounded-lg px-3 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
-                    isActive ? "bg-brand-light font-medium text-brand-dark" : "text-ink-soft hover:bg-ivory hover:text-ink"
-                  )}
-                >
-                  {isActive && <span className="absolute -left-[13px] top-1.5 bottom-1.5 w-0.5 rounded-full bg-brand" aria-hidden="true" />}
-                  {leaf.name}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </>
+      </div>
+      <motion.button
+        type="button"
+        onClick={onCollapse}
+        aria-label={mobile ? "Close menu" : "Collapse sidebar"}
+        whileHover={{ scale: 1.12 }}
+        whileTap={{ scale: 0.92 }}
+        className="glass-strong absolute -right-3 top-6 flex h-7 w-7 items-center justify-center rounded-full text-ink-soft hover:text-ink"
+      >
+        <ChevronLeft size={15} />
+      </motion.button>
+
+      <div className="px-3">
+        <button
+          type="button"
+          onClick={onOpenSearch}
+          className="flex h-10 w-full items-center gap-2 rounded-2xl border border-border-soft bg-surface/70 px-3 text-sm text-ink-faint shadow-card transition-colors hover:border-brand/50"
+        >
+          <Search size={16} />
+          <span className="flex-1 text-left">Search</span>
+          <kbd className="rounded-md bg-surface-muted px-1.5 text-[11px] text-ink-soft">⌘K</kbd>
+        </button>
+      </div>
+
+      <nav className="no-scrollbar mt-2 flex-1 overflow-y-auto px-3 pb-2">
+        {nav.map((section) => (
+          <div key={section.label} className="mt-3">
+            <p className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wider text-ink-faint">{section.label}</p>
+            <ul className="space-y-0.5">
+              {section.items.map((item) => {
+                const containsActive = active?.item.name === item.name;
+                const isOpen = open.has(item.name);
+                const badge = badges[item.name] ?? 0;
+                const Icon = item.icon;
+                const row = (
+                  <>
+                    <span className={cn("app-icon flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-br text-white", item.tint)}>
+                      <Icon size={16} strokeWidth={2.1} />
+                    </span>
+                    <span className="flex-1 truncate text-left">{item.name}</span>
+                    {badge > 0 && <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">{badge}</span>}
+                    {item.children && <ChevronDown size={15} className={cn("text-ink-faint transition-transform duration-200", isOpen && "rotate-180")} />}
+                  </>
+                );
+                const rowClass = cn(
+                  "relative flex w-full items-center gap-3 rounded-2xl px-2 py-1.5 text-sm font-semibold transition-colors",
+                  containsActive ? "text-ink" : "text-ink-soft hover:text-ink"
+                );
+                return (
+                  <li key={item.name}>
+                    {item.children ? (
+                      <button type="button" onClick={() => toggleGroup(item.name)} aria-expanded={isOpen} className={cn(rowClass, "hover:bg-surface/60")}>
+                        {containsActive && !isOpen && <ActiveBg />}
+                        <span className="relative flex w-full items-center gap-3">{row}</span>
+                      </button>
+                    ) : (
+                      <Link href={item.href!} onClick={onNavigate} aria-current={containsActive ? "page" : undefined} className={cn(rowClass, "hover:bg-surface/60")}>
+                        {containsActive && <ActiveBg />}
+                        <span className="relative flex w-full items-center gap-3">{row}</span>
+                      </Link>
+                    )}
+                    <AnimatePresence initial={false}>
+                      {item.children && isOpen && (
+                        <motion.ul
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
+                          className="overflow-hidden"
+                        >
+                          {item.children.map((leaf) => {
+                            const isActive = active?.href === leaf.href;
+                            return (
+                              <li key={leaf.href}>
+                                <Link
+                                  href={leaf.href}
+                                  onClick={onNavigate}
+                                  aria-current={isActive ? "page" : undefined}
+                                  className={cn(
+                                    "relative ml-[26px] flex items-center gap-2.5 rounded-xl py-1.5 pl-4 pr-2 text-[13px] transition-colors",
+                                    isActive ? "font-semibold text-ink" : "text-ink-soft hover:text-ink"
+                                  )}
+                                >
+                                  {isActive && <ActiveBg />}
+                                  <span className={cn("relative h-1.5 w-1.5 rounded-full", isActive ? "bg-brand" : "bg-border-strong")} aria-hidden="true" />
+                                  <span className="relative">{leaf.name}</span>
+                                </Link>
+                              </li>
+                            );
+                          })}
+                        </motion.ul>
+                      )}
+                    </AnimatePresence>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </nav>
+
+      {/* Theme switch + account */}
+      <div className="space-y-1 border-t border-border-soft/70 px-3 pb-3 pt-2">
+        <div className="flex items-center gap-3 rounded-2xl px-2 py-1.5">
+          <span className="app-icon flex h-8 w-8 items-center justify-center rounded-[10px] bg-gradient-to-br from-sky-400 to-indigo-600 text-white">
+            {theme === "dark" ? <Moon size={15} /> : <Sun size={15} />}
+          </span>
+          <span className="flex-1 text-sm font-semibold text-ink">Dark mode</span>
+          <Switch on={theme === "dark"} onChange={(on) => setTheme(on ? "dark" : "light")} label="Dark mode" />
+        </div>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setAccountOpen((o) => !o)}
+            aria-expanded={accountOpen}
+            className="flex w-full items-center gap-3 rounded-2xl px-2 py-1.5 text-left hover:bg-surface/60"
+          >
+            <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-zinc-700 to-zinc-900 text-xs font-bold text-white">
+              {initials(user?.firstName, user?.lastName)}
+              <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-green-500 ring-2 ring-surface" aria-hidden="true" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold text-ink">{user?.firstName} {user?.lastName}</span>
+              <span className="block truncate text-xs text-ink-soft">{user?.email}</span>
+            </span>
+            <ChevronsUpDown size={15} className="text-ink-faint" />
+          </button>
+          <AnimatePresence>
+            {accountOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: 6, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 6, scale: 0.97 }}
+                transition={{ duration: 0.15 }}
+                className="glass-strong absolute bottom-full left-0 right-0 mb-2 rounded-2xl p-1.5"
+              >
+                <Link href="/dashboard/profile" onClick={() => { setAccountOpen(false); onNavigate(); }} className="flex items-center gap-2 rounded-xl px-2.5 py-2 text-sm text-ink hover:bg-surface-muted"><UserRound size={15} /> Your profile</Link>
+                <button type="button" onClick={() => { setAccountOpen(false); logout(); }} className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm text-danger hover:bg-danger-soft"><LogOut size={15} /> Sign out</button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+/** The soft highlight behind the current page, sliding between rows. */
+function ActiveBg() {
+  return (
+    <motion.span
+      layoutId="panel-active"
+      transition={spring}
+      className="absolute inset-0 rounded-2xl bg-surface shadow-raised ring-1 ring-border-soft/60"
+      aria-hidden="true"
+    />
+  );
+}
+
+function Switch({ on, onChange, label }: { on: boolean; onChange: (on: boolean) => void; label: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      onClick={() => onChange(!on)}
+      className={cn("relative flex h-6 w-11 items-center rounded-full p-0.5 transition-colors", on ? "bg-brand justify-end" : "bg-border-strong justify-start")}
+    >
+      <motion.span layout transition={{ type: "spring", stiffness: 600, damping: 32 }} className="h-5 w-5 rounded-full bg-white shadow" />
+    </button>
   );
 }

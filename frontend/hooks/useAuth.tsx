@@ -14,6 +14,7 @@ interface User {
   role: string;
   companyId: string;
   businessType?: string | null;
+  companyName?: string | null;
   currency?: string;
   permissions?: Permissions;
 }

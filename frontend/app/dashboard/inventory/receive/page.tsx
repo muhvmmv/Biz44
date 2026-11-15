@@ -135,7 +135,7 @@ export default function ReceiveInventoryPage() {
   if (success) {
     return (
       <div className="max-w-lg mx-auto text-center py-24">
-        <div className="w-16 h-16 rounded-full bg-[#E6F0EA] flex items-center justify-center mx-auto mb-4">
+        <div className="w-16 h-16 rounded-full bg-success-soft flex items-center justify-center mx-auto mb-4">
           <CheckCircle2 className="w-8 h-8 text-success" />
         </div>
         <h2 className="text-2xl font-bold text-ink">Inventory received!</h2>
@@ -402,7 +402,7 @@ export default function ReceiveInventoryPage() {
         </Card>
 
         {error && (
-          <div className="bg-[#F4E2E1] border border-danger text-danger px-4 py-3 rounded-lg text-sm">
+          <div className="bg-danger-soft border border-danger text-danger px-4 py-3 rounded-lg text-sm">
             {error}
           </div>
         )}

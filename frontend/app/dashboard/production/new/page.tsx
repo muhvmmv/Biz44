@@ -15,6 +15,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useLocation } from "@/hooks/useLocation";
 import { formatQty } from "@/lib/units";
+import { useAuth } from "@/hooks/useAuth";
+import { can } from "@/lib/permissions";
+import PaymentAccountSelect from "@/components/ui/PaymentAccountSelect";
 
 interface Bom { id: string; product: { id: string; name: string; unit: string; price: number }; outputQuantity: number }
 interface Plan {
@@ -36,10 +39,27 @@ export default function NewProductionOrderPage() {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [planError, setPlanError] = useState("");
   const [saving, setSaving] = useState(false);
+  // Made to order for a customer (optional), with a deposit or full payment up front.
+  const { user } = useAuth();
+  const canCustomers = can(user?.permissions, "sales");
+  const canTakeMoney = can(user?.permissions, "sales", "write") || can(user?.permissions, "money", "write");
+  const [customers, setCustomers] = useState<{ id: string; firstName: string; lastName: string }[]>([]);
+  const [customerId, setCustomerId] = useState("");
+  const [unitPrice, setUnitPrice] = useState(0);
+  const [payment, setPayment] = useState<"none" | "deposit" | "full">("none");
+  const [depositAmount, setDepositAmount] = useState(0);
+  const [accountId, setAccountId] = useState("");
   const [error, setError] = useState("");
 
   const needsLocation = activeLocationId === "all" && locations.length > 1;
   const locationName = activeLocation?.name ?? locations[0]?.name ?? "";
+
+  useEffect(() => {
+    if (!canCustomers) return;
+    apiFetch<{ success: boolean; data: { id: string; firstName: string; lastName: string }[] }>("/customers")
+      .then((r) => setCustomers(r.data))
+      .catch(() => setCustomers([]));
+  }, [canCustomers]);
 
   useEffect(() => {
     apiFetch<{ success: boolean; data: Bom[] }>("/production/boms")
@@ -60,17 +80,27 @@ export default function NewProductionOrderPage() {
   }, [productId, quantity]);
 
   const bom = boms?.find((b) => b.product.id === productId);
+  const orderValue = Math.round(unitPrice * quantity * 100) / 100;
+  const received = payment === "full" ? orderValue : payment === "deposit" ? depositAmount : 0;
   const showPlan = !!productId && quantity > 0;
 
   const create = async () => {
     setError("");
     if (!productId) return setError("Choose what to produce");
     if (!(quantity > 0)) return setError("Enter how many to produce");
+    if (received > 0 && !customerId) return setError("Choose the customer the payment is from");
+    if (received > 0 && !accountId) return setError("Choose the account the payment went into");
+    if (payment === "deposit" && depositAmount > orderValue && orderValue > 0) return setError("The deposit is more than the order value");
     setSaving(true);
     try {
       const r = await apiFetch<{ success: boolean; data: { id: string } }>("/production/orders", {
         method: "POST",
-        body: JSON.stringify({ productId, plannedQuantity: quantity, plannedDate: plannedDate || undefined, notes: notes || undefined }),
+        body: JSON.stringify({
+          productId, plannedQuantity: quantity, plannedDate: plannedDate || undefined, notes: notes || undefined,
+          customerId: customerId || undefined,
+          unitPrice: customerId ? unitPrice : undefined,
+          deposit: received > 0 ? { amount: received, accountId } : undefined,
+        }),
       });
       router.push(`/dashboard/production/${r.data.id}`);
     } catch (e: unknown) {
@@ -105,7 +135,7 @@ export default function NewProductionOrderPage() {
             <CardHeader><CardTitle>What to make</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               <Field label="Finished good" required>
-                <Select value={productId} onChange={(e) => { setProductId(e.target.value); setPlan(null); }}>
+                <Select value={productId} onChange={(e) => { setProductId(e.target.value); setPlan(null); setUnitPrice(boms.find((b) => b.product.id === e.target.value)?.product.price ?? 0); }}>
                   <option value="">Choose a product</option>
                   {boms.map((b) => <option key={b.id} value={b.product.id}>{b.product.name}</option>)}
                 </Select>
@@ -119,6 +149,55 @@ export default function NewProductionOrderPage() {
               <Field label="Notes">
                 <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional" />
               </Field>
+              {canCustomers && (
+                <div className="space-y-4 rounded-2xl border border-border-soft bg-surface-muted p-4">
+                  <Field label="For a customer" hint="Optional: leave empty when producing for stock">
+                    <Select value={customerId} onChange={(e) => { setCustomerId(e.target.value); if (!e.target.value) setPayment("none"); }}>
+                      <option value="">Producing for stock</option>
+                      {customers.map((c) => <option key={c.id} value={c.id}>{c.firstName} {c.lastName}</option>)}
+                    </Select>
+                  </Field>
+                  {customerId && (
+                    <>
+                      <Field label={`Agreed price per ${bom?.product.unit ?? "unit"}`} hint={orderValue > 0 ? `Order value ${format(orderValue)}` : undefined}>
+                        <NumericInput min={0} value={unitPrice} onChange={setUnitPrice} />
+                      </Field>
+                      {canTakeMoney ? (
+                        <>
+                          <div>
+                            <p className="mb-1.5 text-sm font-medium">Payment received</p>
+                            <div className="grid grid-cols-3 gap-1 rounded-xl bg-surface p-1">
+                              {([["none", "None"], ["deposit", "Deposit"], ["full", "Paid in full"]] as const).map(([v, label]) => (
+                                <button
+                                  key={v}
+                                  type="button"
+                                  onClick={() => setPayment(v)}
+                                  className={`rounded-lg px-2 py-1.5 text-sm font-semibold transition-colors ${payment === v ? "bg-charcoal text-white" : "text-ink-soft hover:text-ink"}`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          {payment === "deposit" && (
+                            <Field label="Deposit amount" hint={orderValue > 0 && depositAmount > 0 ? `${Math.round((depositAmount / orderValue) * 100)}% of the order · ${format(Math.max(0, orderValue - depositAmount))} to collect` : undefined}>
+                              <NumericInput min={0} value={depositAmount} onChange={setDepositAmount} />
+                            </Field>
+                          )}
+                          {payment !== "none" && (
+                            <Field label="Received into"><PaymentAccountSelect value={accountId} onChange={setAccountId} /></Field>
+                          )}
+                          {payment !== "none" && received > 0 && (
+                            <p className="text-xs text-ink-soft">{format(received)} is held as a customer deposit and applied to the invoice when you bill this order.</p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-xs text-ink-soft">Ask a sales or accounts colleague to record any deposit on the order page.</p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
               {needsLocation && (
                 <p className="rounded-xl bg-warning-soft px-3 py-2 text-sm text-warning">Choose a location in the top bar: production happens at one location.</p>
               )}
