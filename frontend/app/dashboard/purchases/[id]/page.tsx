@@ -418,7 +418,7 @@ export default function PurchaseDetailPage() {
         <div>
           <label className="block text-sm font-medium mb-1">Units to return</label>
           <NumericInput
-            allowDecimals={false}
+           
             min={0}
             max={returnBatch?.quantityRemaining}
             value={returnQty}

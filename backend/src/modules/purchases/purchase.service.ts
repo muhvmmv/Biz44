@@ -2,7 +2,7 @@ import { prisma } from '../../lib/prisma';
 import { badRequest, notFound } from '../../lib/errors';
 import { resolvePaymentAccount, parsePositiveQuantity } from '../../lib/accounts';
 import { postJournal, systemAccount } from '../../lib/ledger';
-import { consumeFromBatch, syncProductTotals } from '../../lib/inventory';
+import { consumeFromBatch, syncProductTotals, inventoryAccountFor } from '../../lib/inventory';
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -86,7 +86,8 @@ export async function returnToSupplier(args: {
     });
 
     // Dr Accounts Payable (owed reduced) + Dr Cash/Bank (refund) / Cr Inventory (cost returned)
-    const inventory = await systemAccount(tx, companyId, 'inventory');
+    const product = await tx.product.findFirst({ where: { id: batch.productId, companyId }, select: { itemType: true } });
+    const inventory = await inventoryAccountFor(tx, companyId, product?.itemType);
     const ap = await systemAccount(tx, companyId, 'ap');
     await postJournal(tx, {
       companyId,

@@ -60,11 +60,26 @@ export function parsePositiveAmount(value: unknown, label = 'Amount'): number {
   return Math.round(n * 100) / 100;
 }
 
-/** Parse a strictly positive whole-number quantity, or throw 400. */
+/** Quantities are stored with up to 4 decimal places (e.g. 2.5 kg, 0.125 l). */
+export const QTY_DECIMALS = 4;
+export const roundQty = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
+
+/** Parse a quantity greater than 0 (up to 4 decimal places), or throw 400. */
 export function parsePositiveQuantity(value: unknown, label = 'Quantity'): number {
   const n = typeof value === 'string' ? Number(value) : (value as number);
-  if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) {
-    throw badRequest(`${label} must be a whole number greater than 0`);
+  if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) {
+    throw badRequest(`${label} must be greater than 0`);
   }
-  return n;
+  const r = roundQty(n);
+  if (r <= 0) throw badRequest(`${label} must be greater than 0`);
+  return r;
+}
+
+/** Parse a quantity of 0 or more (up to 4 decimal places), or throw 400. */
+export function parseQuantity(value: unknown, label = 'Quantity'): number {
+  const n = typeof value === 'string' ? Number(value) : (value as number);
+  if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) {
+    throw badRequest(`${label} must be 0 or more`);
+  }
+  return roundQty(n);
 }

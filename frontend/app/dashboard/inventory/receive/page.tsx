@@ -223,7 +223,7 @@ export default function ReceiveInventoryPage() {
                           Quantity
                         </label>
                         <NumericInput
-                          allowDecimals={false}
+                         
                           min={1}
                           value={item.quantity}
                           onChange={(v) => updateLine(index, { quantity: v })}

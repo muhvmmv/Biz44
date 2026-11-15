@@ -8,6 +8,7 @@ import { purchaseBalance } from '../purchases/purchase.service';
 import { profitAndLoss, cashFlow, monthlyPnl } from '../../lib/reports';
 import { listPaymentAccounts } from '../../lib/accounts';
 import { runStockCheck } from '../../lib/stockCheck';
+import { productionSummary } from '../production/production.service';
 const router = Router();
 
 router.use(authenticate);
@@ -79,7 +80,7 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
     // company-wide cache, so a single branch shows its own stock.
     const products = await prisma.product.findMany({
       where: { companyId },
-      select: { id: true, reorderPoint: true },
+      select: { id: true, reorderPoint: true, itemType: true },
     });
     const stock = await stockByProduct(prisma, companyId, req.locationId ?? req.allowedLocationIds);
     const qtyOf = (id: string) => stock.get(id)?.quantity ?? 0;
@@ -88,6 +89,16 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
       Array.from(stock.values()).reduce((s, v) => s + v.value, 0) * 100
     ) / 100;
     const lowStock = products.filter((p) => qtyOf(p.id) > 0 && qtyOf(p.id) <= p.reorderPoint).length;
+
+    // Inventory by stage: raw materials & packaging, work in progress, finished goods.
+    const valueOf = (id: string) => stock.get(id)?.value ?? 0;
+    const round = (n: number) => Math.round(n * 100) / 100;
+    const production = await productionSummary(companyId, periodStart, now, locationIds);
+    const inventoryByStage = {
+      raw: round(products.filter((p) => p.itemType !== 'finished_good').reduce((s, p) => s + valueOf(p.id), 0)),
+      wip: production.wipValue,
+      finished: round(products.filter((p) => p.itemType === 'finished_good').reduce((s, p) => s + valueOf(p.id), 0)),
+    };
     const outOfStock = products.filter((p) => qtyOf(p.id) === 0).length;
 
     // ---- Top products ----
@@ -133,6 +144,15 @@ router.get('/summary', resolveLocation, async (req: Request, res: Response, next
         unpaidCount: unpaidInvoices.length,
         totalUnits,
         inventoryValue,
+        inventoryByStage,
+        production: {
+          completedOrders: production.completedOrders,
+          inProgressOrders: production.inProgressOrders,
+          draftOrders: production.draftOrders,
+          totalCost: production.totalCost,
+          wipValue: production.wipValue,
+          products: production.products,
+        },
         lowStock,
         outOfStock,
         dueToday: dueTodayInvoices.length,

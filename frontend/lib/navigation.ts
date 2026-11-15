@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, Package, ShoppingCart, Receipt, Users, Wallet, Landmark,
+  LayoutDashboard, Package, ShoppingCart, Factory, Receipt, Users, Wallet, Landmark,
   Calculator, Briefcase, FileText, Settings, type LucideIcon,
 } from "lucide-react";
 
@@ -55,6 +55,14 @@ export const NAV: NavSection[] = [
           { name: "Receive goods", href: "/dashboard/inventory/receive", keywords: ["receive inventory", "delivery"] },
           { name: "Suppliers", href: "/dashboard/suppliers", keywords: ["vendors"] },
           { name: "Payables", href: "/dashboard/accounting/payable", keywords: ["accounts payable", "owed", "supplier payments"] },
+        ],
+      },
+      {
+        name: "Production",
+        icon: Factory,
+        children: [
+          { name: "Production orders", href: "/dashboard/production", keywords: ["manufacturing", "make", "batch", "run", "mo"] },
+          { name: "Bills of materials", href: "/dashboard/production/boms", keywords: ["bom", "recipe", "formula", "materials"] },
         ],
       },
       {

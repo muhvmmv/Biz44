@@ -15,4 +15,9 @@ export const SOURCE_LABELS: Record<string, string> = {
   payroll: "Payroll",
   transfer: "Transfer",
   manual: "Manual entry",
+  production_issue: "Materials into production",
+  production_return: "Materials returned from production",
+  production_output: "Production completed",
+  production_writeoff: "Failed production written off",
+  stock_reclass: "Item type changed",
 };

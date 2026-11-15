@@ -22,6 +22,7 @@ import invoiceRoutes from './modules/invoices/invoices.routes';
 import reportNotesRoutes from './modules/reports/notes.routes';
 import purchaseRoutes from './modules/purchases/purchases.routes';
 import locationRoutes from './modules/locations/locations.routes';
+import productionRoutes from './modules/production/production.routes';
 
 const app = express(); 
 
@@ -47,6 +48,7 @@ app.use('/api/invoices', invoiceRoutes);
 app.use('/api/report-notes', reportNotesRoutes);
 app.use('/api/purchases', purchaseRoutes);
 app.use('/api/locations', locationRoutes);
+app.use('/api/production', productionRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

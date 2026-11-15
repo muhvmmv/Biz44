@@ -3,10 +3,10 @@ import { authenticate } from '../../middleware/auth';
 import { resolveLocation, locationWhere, requireTargetLocation } from '../../middleware/locationAuth';
 import { prisma } from '../../lib/prisma';
 import { badRequest, notFound } from '../../lib/errors';
-import { resolvePaymentAccount, parsePositiveAmount, parsePositiveQuantity } from '../../lib/accounts';
+import { resolvePaymentAccount, parsePositiveAmount, parsePositiveQuantity, parseQuantity, roundQty } from '../../lib/accounts';
 import { postJournal, systemAccount } from '../../lib/ledger';
 import {
-  addStock, consumeFifo, stockAt, averageCost, syncProductTotals, postInventoryLoss,
+  addStock, consumeFifo, stockAt, averageCost, syncProductTotals, postInventoryLoss, inventoryAccountFor,
 } from '../../lib/inventory';
 import { runStockCheck, fixSafeStockIssues } from '../../lib/stockCheck';
 import { returnToSupplier } from '../purchases/purchase.service';
@@ -50,7 +50,7 @@ router.get('/batches/:productId', resolveLocation, async (req: Request, res: Res
     const batches = await prisma.inventoryBatch.findMany({
       where: { companyId, productId: req.params.productId, ...locationWhere(req) },
       orderBy: { receivedAt: 'asc' },
-      include: { supplier: { select: { name: true } }, location: { select: { name: true } } },
+      include: { supplier: { select: { name: true } }, location: { select: { name: true } }, productionOrder: { select: { id: true, number: true } } },
     });
     res.json({ success: true, data: batches });
   } catch (err) { next(err); }
@@ -217,8 +217,17 @@ router.post('/receive', resolveLocation, async (req: Request, res: Response, nex
       }
       await syncProductTotals(tx, companyId, productIds);
 
-      // Dr Inventory (full cost) / Cr Cash-or-Bank (paid now) / Cr Accounts Payable (owed)
-      const inventory = await systemAccount(tx, companyId, 'inventory');
+      // Dr the inventory account for each item's stage (raw materials &
+      // packaging, or finished goods) / Cr Cash-or-Bank (paid now) / Cr Accounts Payable (owed)
+      const typeOf = new Map(
+        (await tx.product.findMany({ where: { id: { in: productIds }, companyId }, select: { id: true, itemType: true } }))
+          .map((p: { id: string; itemType: string }) => [p.id, p.itemType])
+      );
+      const debitByAccount = new Map<string, number>();
+      for (const it of items) {
+        const acc = await inventoryAccountFor(tx, companyId, typeOf.get(it.productId));
+        debitByAccount.set(acc.id, (debitByAccount.get(acc.id) ?? 0) + it.quantity * it.unitCost);
+      }
       const ap = await systemAccount(tx, companyId, 'ap');
       await postJournal(tx, {
         companyId,
@@ -229,7 +238,7 @@ router.post('/receive', resolveLocation, async (req: Request, res: Response, nex
         reference,
         createdById: req.user!.id,
         lines: [
-          { accountId: inventory.id, debit: totalCost },
+          ...Array.from(debitByAccount, ([accountId, amount]) => ({ accountId, debit: amount })),
           ...(paidAmount > 0 && payFromAccount ? [{ accountId: payFromAccount.id, credit: paidAmount }] : []),
           ...(outstanding > 0 ? [{ accountId: ap.id, credit: outstanding }] : []),
         ],
@@ -254,11 +263,11 @@ router.post('/damage', resolveLocation, async (req: Request, res: Response, next
     await prisma.$transaction(async (tx) => {
       const product = await findCompanyProduct(tx, companyId, productId);
       const { totalCost } = await consumeFifo(tx, {
-        companyId, locationId, productId: product.id, productName: product.name, quantity,
+        companyId, locationId, productId: product.id, productName: product.name, unit: product.unit, quantity,
         type: 'damage', reference: reason || 'Damage/Write-off', notes,
       });
       await postInventoryLoss(tx, {
-        companyId, locationId, amount: totalCost, sourceType: 'stock_writeoff', sourceId: product.id,
+        companyId, locationId, itemType: product.itemType, amount: totalCost, sourceType: 'stock_writeoff', sourceId: product.id,
         reference: reason || 'Write-off',
         description: `Write-off: ${quantity} × ${product.name}${reason ? ` (${reason})` : ''}`,
       });
@@ -305,14 +314,14 @@ async function applyStockChange(
       valueChange = totalCost;
     } else if (delta < 0) {
       const { totalCost } = await consumeFifo(tx, {
-        companyId, locationId, productId: product.id, productName: product.name, quantity: -delta,
+        companyId, locationId, productId: product.id, productName: product.name, unit: product.unit, quantity: -delta,
         type, reference: type === 'count' ? 'Stock count' : 'Adjustment', notes,
       });
       valueChange = -totalCost;
     }
     if (valueChange !== 0) {
       await postInventoryLoss(tx, {
-        companyId, locationId, amount: -valueChange,
+        companyId, locationId, itemType: product.itemType, amount: -valueChange,
         sourceType: type === 'count' ? 'stock_count' : 'stock_adjustment', sourceId: product.id,
         description: `${type === 'count' ? 'Stock count' : 'Stock adjustment'}: ${delta > 0 ? '+' : ''}${delta} × ${product.name}`,
       });
@@ -327,9 +336,9 @@ router.post('/adjust', resolveLocation, async (req: Request, res: Response, next
   try {
     const companyId = req.user!.companyId;
     const locationId = requireTargetLocation(req);
-    const quantity = Number(req.body?.quantity);
-    if (!Number.isInteger(quantity) || quantity === 0) {
-      throw badRequest('Adjustment quantity must be a whole number other than 0');
+    const quantity = roundQty(Number(req.body?.quantity));
+    if (!Number.isFinite(quantity) || quantity === 0) {
+      throw badRequest('Adjustment quantity must be a number other than 0');
     }
     const result = await applyStockChange(companyId, locationId, req.body?.productId, quantity, 'adjustment', req.body?.notes);
     res.status(201).json({ success: true, data: result });
@@ -341,13 +350,10 @@ router.post('/count', resolveLocation, async (req: Request, res: Response, next:
   try {
     const companyId = req.user!.companyId;
     const locationId = requireTargetLocation(req);
-    const counted = Number(req.body?.countedQuantity);
-    if (!Number.isInteger(counted) || counted < 0) {
-      throw badRequest('Counted quantity must be a whole number of 0 or more');
-    }
+    const counted = parseQuantity(req.body?.countedQuantity, 'Counted quantity');
     const product = await findCompanyProduct(prisma, companyId, req.body?.productId);
     const onHand = await stockAt(prisma, companyId, product.id, locationId);
-    const delta = counted - onHand;
+    const delta = roundQty(counted - onHand);
     if (delta === 0) {
       return res.json({ success: true, data: { productId: product.id, delta: 0, valueChange: 0, onHand } });
     }

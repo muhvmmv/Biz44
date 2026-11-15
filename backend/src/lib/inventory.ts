@@ -9,15 +9,46 @@
  * They are recomputed from batches by syncProductTotals() after every change
  * and must never be edited directly.
  *
+ * Quantities are decimals with up to 4 places (kg, litres...). Every batch
+ * update writes an exact rounded value and is guarded by the value that was
+ * read, so concurrent changes are detected and floating-point dust never
+ * accumulates.
+ *
+ * Inventory value is kept by stage: raw materials and packaging in one
+ * account, finished goods in another (work in progress is handled by
+ * production orders). inventoryAccountFor() picks the right one.
+ *
  * Every function takes a Prisma transaction client so callers can combine
  * stock changes with accounting entries atomically.
  */
 import { badRequest, AppError } from './errors';
-import { postJournal, systemAccount, round2 } from './ledger';
+import { postJournal, systemAccount, round2, SystemKey } from './ledger';
+import { roundQty } from './accounts';
 
 type Tx = any;
 
+export const ITEM_TYPES = ['raw_material', 'packaging', 'finished_good'] as const;
+export type ItemType = (typeof ITEM_TYPES)[number];
 
+/** The inventory account a product's value is held in. */
+export function stageKeyFor(itemType: string | null | undefined): SystemKey {
+  return itemType === 'raw_material' || itemType === 'packaging' ? 'inventory_raw' : 'inventory';
+}
+
+export function inventoryAccountFor(tx: Tx, companyId: string, itemType: string | null | undefined) {
+  return systemAccount(tx, companyId, stageKeyFor(itemType));
+}
+
+const CHANGED = () => new AppError(409, 'Stock changed while saving. Please try again.');
+
+/** Set a batch's remaining quantity, only if it still has the value we read. */
+async function setRemaining(tx: Tx, batchId: string, expected: number, next: number) {
+  const { count } = await tx.inventoryBatch.updateMany({
+    where: { id: batchId, quantityRemaining: expected },
+    data: { quantityRemaining: roundQty(next) },
+  });
+  if (count === 0) throw CHANGED();
+}
 
 /** Batch filter for one product at a location (null = all locations). */
 function batchWhere(companyId: string, productId: string, locationId: string | null) {
@@ -28,13 +59,13 @@ function batchWhere(companyId: string, productId: string, locationId: string | n
   };
 }
 
-/** Units of a product on hand at a location (null = whole company). */
+/** Quantity of a product on hand at a location (null = whole company). */
 export async function stockAt(tx: Tx, companyId: string, productId: string, locationId: string | null) {
   const agg = await tx.inventoryBatch.aggregate({
     where: { ...batchWhere(companyId, productId, locationId), quantityRemaining: { gt: 0 } },
     _sum: { quantityRemaining: true },
   });
-  return agg._sum.quantityRemaining ?? 0;
+  return roundQty(agg._sum.quantityRemaining ?? 0);
 }
 
 /**
@@ -64,7 +95,10 @@ export async function stockByProduct(
     cur.value += b.quantityRemaining * b.unitCost;
     map.set(b.productId, cur);
   }
-  for (const v of map.values()) v.value = round2(v.value);
+  for (const v of map.values()) {
+    v.quantity = roundQty(v.quantity);
+    v.value = round2(v.value);
+  }
   return map;
 }
 
@@ -83,15 +117,14 @@ export async function syncProductTotals(tx: Tx, companyId: string, productIds: s
 }
 
 interface MovementInfo {
-  type: string; // receipt | opening | sale | return | damage | adjustment | count | supplier_return
+  /** receipt | opening | sale | return | damage | adjustment | count | supplier_return |
+   *  production_issue | production_return | production_output */
+  type: string;
   reference?: string | null;
   notes?: string | null;
 }
 
-/**
- * Add stock as a new cost layer and record the movement.
- * Returns the batch and the movement.
- */
+/** Add stock as a new cost layer and record the movement. */
 export async function addStock(
   tx: Tx,
   args: {
@@ -102,13 +135,13 @@ export async function addStock(
     unitCost: number;
     supplierId?: string | null;
     purchaseId?: string | null;
+    productionOrderId?: string | null;
     sellingPriceSnapshot?: number;
     batchReference?: string | null;
   } & MovementInfo
 ) {
-  if (!Number.isInteger(args.quantity) || args.quantity <= 0) {
-    throw badRequest('Quantity to add must be a whole number greater than 0');
-  }
+  const quantity = roundQty(args.quantity);
+  if (!(quantity > 0)) throw badRequest('Quantity to add must be greater than 0');
   const before = await stockAt(tx, args.companyId, args.productId, args.locationId);
   const batch = await tx.inventoryBatch.create({
     data: {
@@ -117,14 +150,15 @@ export async function addStock(
       productId: args.productId,
       supplierId: args.supplierId ?? null,
       purchaseId: args.purchaseId ?? null,
-      quantityReceived: args.quantity,
-      quantityRemaining: args.quantity,
+      productionOrderId: args.productionOrderId ?? null,
+      quantityReceived: quantity,
+      quantityRemaining: quantity,
       unitCost: args.unitCost,
       sellingPriceSnapshot: args.sellingPriceSnapshot ?? 0,
       reference: args.batchReference ?? args.reference ?? null,
     },
   });
-  const totalCost = round2(args.quantity * args.unitCost);
+  const totalCost = round2(quantity * args.unitCost);
   const movement = await tx.stockMovement.create({
     data: {
       companyId: args.companyId,
@@ -132,8 +166,8 @@ export async function addStock(
       productId: args.productId,
       batchId: batch.id,
       type: args.type,
-      quantity: args.quantity,
-      balance: before + args.quantity,
+      quantity,
+      balance: roundQty(before + quantity),
       unitCost: args.unitCost,
       totalCost,
       reference: args.reference ?? null,
@@ -148,8 +182,8 @@ export async function addStock(
  * movement per batch touched. Throws 400 if the location does not have
  * enough stock — it never removes part of the quantity.
  *
- * Returns the total cost removed (for COGS / write-off value) and the
- * per-batch lines so the change can be reversed exactly.
+ * Returns the total cost removed and the per-batch lines (so the change can
+ * be reversed exactly or traced).
  */
 export async function consumeFifo(
   tx: Tx,
@@ -158,23 +192,24 @@ export async function consumeFifo(
     locationId: string | null;
     productId: string;
     productName?: string;
+    unit?: string;
     quantity: number;
   } & MovementInfo
 ) {
-  const { companyId, locationId, productId, quantity } = args;
-  if (!Number.isInteger(quantity) || quantity <= 0) {
-    throw badRequest('Quantity to remove must be a whole number greater than 0');
-  }
+  const { companyId, locationId, productId } = args;
+  const quantity = roundQty(args.quantity);
+  if (!(quantity > 0)) throw badRequest('Quantity to remove must be greater than 0');
 
   const batches = await tx.inventoryBatch.findMany({
     where: { ...batchWhere(companyId, productId, locationId), quantityRemaining: { gt: 0 } },
     orderBy: [{ receivedAt: 'asc' }, { createdAt: 'asc' }],
   });
-  const available = batches.reduce((s: number, b: any) => s + b.quantityRemaining, 0);
+  const available = roundQty(batches.reduce((s: number, b: any) => s + b.quantityRemaining, 0));
   if (available < quantity) {
-    const name = args.productName ? `${args.productName}` : 'this product';
+    const name = args.productName ?? 'this product';
+    const unit = args.unit ? ` ${args.unit}` : '';
     throw badRequest(
-      `Insufficient stock: only ${available} of ${name} available${locationId ? ' at this location' : ''}, ${quantity} needed`
+      `Insufficient stock: only ${available}${unit} of ${name} available${locationId ? ' at this location' : ''}, ${quantity}${unit} needed`
     );
   }
 
@@ -185,20 +220,12 @@ export async function consumeFifo(
 
   for (const b of batches) {
     if (remaining <= 0) break;
-    const take = Math.min(b.quantityRemaining, remaining);
-
-    // Guarded decrement: fails if another request consumed this batch
-    // after we read it, so two sales can never oversell the same units.
-    const { count } = await tx.inventoryBatch.updateMany({
-      where: { id: b.id, quantityRemaining: { gte: take } },
-      data: { quantityRemaining: { decrement: take } },
-    });
-    if (count === 0) {
-      throw new AppError(409, 'Stock changed while saving. Please try again.');
-    }
+    const take = roundQty(Math.min(b.quantityRemaining, remaining));
+    if (take <= 0) continue;
+    await setRemaining(tx, b.id, b.quantityRemaining, b.quantityRemaining - take);
 
     const cost = round2(take * b.unitCost);
-    balance -= take;
+    balance = roundQty(balance - take);
     totalCost += cost;
     lines.push({ batchId: b.id, quantity: take, unitCost: b.unitCost, cost });
 
@@ -217,33 +244,27 @@ export async function consumeFifo(
         notes: args.notes ?? null,
       },
     });
-    remaining -= take;
+    remaining = roundQty(remaining - take);
   }
 
   return { totalCost: round2(totalCost), lines };
 }
 
-/**
- * Remove stock from one specific batch (e.g. returning a delivery to its
- * supplier). Throws 400 if the batch does not hold enough.
- */
+/** Remove stock from one specific batch (e.g. returning a delivery to its supplier). */
 export async function consumeFromBatch(
   tx: Tx,
   args: { companyId: string; batchId: string; quantity: number } & MovementInfo
 ) {
+  const quantity = roundQty(args.quantity);
   const batch = await tx.inventoryBatch.findFirst({ where: { id: args.batchId, companyId: args.companyId } });
   if (!batch) throw badRequest('Batch not found');
-  if (batch.quantityRemaining < args.quantity) {
+  if (batch.quantityRemaining < quantity) {
     throw badRequest(`Only ${batch.quantityRemaining} left in that batch`);
   }
-  const { count } = await tx.inventoryBatch.updateMany({
-    where: { id: batch.id, quantityRemaining: { gte: args.quantity } },
-    data: { quantityRemaining: { decrement: args.quantity } },
-  });
-  if (count === 0) throw new AppError(409, 'Stock changed while saving. Please try again.');
+  await setRemaining(tx, batch.id, batch.quantityRemaining, batch.quantityRemaining - quantity);
 
   const after = await stockAt(tx, args.companyId, batch.productId, batch.locationId);
-  const cost = round2(args.quantity * batch.unitCost);
+  const cost = round2(quantity * batch.unitCost);
   await tx.stockMovement.create({
     data: {
       companyId: args.companyId,
@@ -251,7 +272,7 @@ export async function consumeFromBatch(
       productId: batch.productId,
       batchId: batch.id,
       type: args.type,
-      quantity: -args.quantity,
+      quantity: -quantity,
       balance: after,
       unitCost: batch.unitCost,
       totalCost: cost,
@@ -263,21 +284,20 @@ export async function consumeFromBatch(
 }
 
 /**
- * Put units back into the exact batch they came from (used when a sale is
- * cancelled), so the original cost layer is restored.
+ * Put units back into the exact batch they came from (a cancelled sale,
+ * unused production material), so the original cost layer is restored.
  */
 export async function restoreToBatch(
   tx: Tx,
   args: { companyId: string; batchId: string; quantity: number } & MovementInfo
 ) {
+  const quantity = roundQty(args.quantity);
   const batch = await tx.inventoryBatch.findFirst({ where: { id: args.batchId, companyId: args.companyId } });
   if (!batch) throw badRequest('Original batch not found');
-  await tx.inventoryBatch.update({
-    where: { id: batch.id },
-    data: { quantityRemaining: { increment: args.quantity } },
-  });
+  await setRemaining(tx, batch.id, batch.quantityRemaining, batch.quantityRemaining + quantity);
+
   const after = await stockAt(tx, args.companyId, batch.productId, batch.locationId);
-  const cost = round2(args.quantity * batch.unitCost);
+  const cost = round2(quantity * batch.unitCost);
   await tx.stockMovement.create({
     data: {
       companyId: args.companyId,
@@ -285,7 +305,7 @@ export async function restoreToBatch(
       productId: batch.productId,
       batchId: batch.id,
       type: args.type,
-      quantity: args.quantity,
+      quantity,
       balance: after,
       unitCost: batch.unitCost,
       totalCost: cost,
@@ -296,7 +316,7 @@ export async function restoreToBatch(
   return { batch, cost };
 }
 
-/** Weighted average unit cost of a product's stock at a location (falls back to product.cost). */
+/** Weighted average unit cost of a product's stock at a location (falls back to `fallback`). */
 export async function averageCost(
   tx: Tx,
   companyId: string,
@@ -313,14 +333,15 @@ export async function averageCost(
 /**
  * Book a change in inventory value as a loss (positive amount) or a gain
  * (negative amount): write-offs, count differences, adjustments.
- *   loss: Dr Inventory Loss / Cr Inventory
- *   gain: Dr Inventory / Cr Inventory Loss (gains reduce the period's losses)
+ *   loss: Dr Inventory Loss / Cr the product's inventory account
+ *   gain: Dr the product's inventory account / Cr Inventory Loss
  */
 export async function postInventoryLoss(
   tx: Tx,
   args: {
     companyId: string;
     locationId: string | null;
+    itemType: string;
     amount: number;
     description: string;
     sourceType?: string;
@@ -330,7 +351,7 @@ export async function postInventoryLoss(
 ) {
   const amount = round2(args.amount);
   if (amount === 0) return;
-  const inventory = await systemAccount(tx, args.companyId, 'inventory');
+  const inventory = await inventoryAccountFor(tx, args.companyId, args.itemType);
   const loss = await systemAccount(tx, args.companyId, 'inventory_loss');
   await postJournal(tx, {
     companyId: args.companyId,
@@ -346,14 +367,14 @@ export async function postInventoryLoss(
   });
 }
 
-/** Opening stock brought in at cost: Dr Inventory / Cr Opening Balance Equity. */
+/** Opening stock brought in at cost: Dr inventory (by type) / Cr Opening Balance Equity. */
 export async function postOpeningStock(
   tx: Tx,
-  args: { companyId: string; locationId: string | null; amount: number; description: string; sourceId?: string | null }
+  args: { companyId: string; locationId: string | null; itemType: string; amount: number; description: string; sourceId?: string | null }
 ) {
   const amount = round2(args.amount);
   if (amount <= 0) return;
-  const inventory = await systemAccount(tx, args.companyId, 'inventory');
+  const inventory = await inventoryAccountFor(tx, args.companyId, args.itemType);
   const equity = await systemAccount(tx, args.companyId, 'opening_equity');
   await postJournal(tx, {
     companyId: args.companyId,

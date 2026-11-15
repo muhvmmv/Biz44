@@ -23,6 +23,9 @@ const typeConfig: Record<string, { label: string; variant: "success" | "danger" 
   supplier_return: { label: "Supplier Return", variant: "warning" },
   adjustment: { label: "Adjustment", variant: "warning" },
   count: { label: "Stock count", variant: "warning" },
+  production_issue: { label: "Used in production", variant: "info" },
+  production_return: { label: "Returned from production", variant: "success" },
+  production_output: { label: "Produced", variant: "success" },
   damage: { label: "Damage", variant: "danger" },
   transfer: { label: "Transfer", variant: "default" },
 };

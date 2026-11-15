@@ -19,6 +19,7 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import { useCurrency } from "@/hooks/useCurrency";
+import { formatQty } from "@/lib/units";
 
 interface Business {
   id: string;
@@ -59,7 +60,7 @@ interface Invoice {
     quantity: number;
     unitPrice: number;
     total: number;
-    product: { name: string; sku: string | null } | null;
+    product: { name: string; sku: string | null; unit?: string } | null;
   }[];
   payments: {
     id: string;
@@ -118,18 +119,43 @@ export default function InvoiceDetailPage() {
     };
   }, [id]);
 
-  const finalize = async () => {
-    if (
-      !confirm(
-        "Finalize this invoice? This will deduct stock and cannot be undone."
-      )
-    )
+  const [showFinalize, setShowFinalize] = useState(false);
+  const [initialAmount, setInitialAmount] = useState(0);
+  const [initialMethod, setInitialMethod] = useState("cash");
+  const [initialAccountId, setInitialAccountId] = useState("");
+  const [initialReference, setInitialReference] = useState("");
+  const [finalizing, setFinalizing] = useState(false);
+  const [finalizeError, setFinalizeError] = useState("");
+
+  const finalize = () => {
+    setInitialAmount(0);
+    setInitialReference("");
+    setFinalizeError("");
+    setShowFinalize(true);
+  };
+
+  const confirmFinalize = async () => {
+    setFinalizeError("");
+    if (initialAmount > 0 && !initialAccountId) {
+      setFinalizeError("Choose the account the payment went into");
       return;
+    }
+    setFinalizing(true);
     try {
-      await apiFetch(`/invoices/${id}/finalize`, { method: "POST" });
+      await apiFetch(`/invoices/${id}/finalize`, {
+        method: "POST",
+        body: JSON.stringify(
+          initialAmount > 0
+            ? { payment: { amount: initialAmount, accountId: initialAccountId, method: initialMethod, reference: initialReference || undefined } }
+            : {}
+        ),
+      });
+      setShowFinalize(false);
       load();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Failed");
+      setFinalizeError(err instanceof Error ? err.message : "Could not finalize the invoice");
+    } finally {
+      setFinalizing(false);
     }
   };
 
@@ -369,7 +395,7 @@ export default function InvoiceDetailPage() {
                       </div>
                     )}
                   </td>
-                  <td className="px-5 py-4 text-right text-ink">{it.quantity}</td>
+                  <td className="px-5 py-4 text-right text-ink">{formatQty(it.quantity, it.product?.unit)}</td>
                   <td className="px-5 py-4 text-right text-ink">
                     {format(it.unitPrice)}
                   </td>
@@ -582,6 +608,70 @@ export default function InvoiceDetailPage() {
           </div>
         )}
         {cancelError && <p className="text-sm text-danger">{cancelError}</p>}
+      </Dialog>
+
+      <Dialog
+        open={showFinalize}
+        onClose={() => setShowFinalize(false)}
+        title={`Finalize ${invoice.invoiceNumber}?`}
+        description="Stock is deducted at its batch cost and the sale is recorded in the accounts. This can't be undone, only cancelled."
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setShowFinalize(false)}>Back</Button>
+            <Button onClick={confirmFinalize} isLoading={finalizing}>
+              <CheckCircle2 className="w-4 h-4 mr-1" /> Finalize{initialAmount > 0 ? " & record payment" : ""}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex justify-between rounded-lg bg-ivory px-4 py-3 text-sm">
+          <span className="text-ink-soft">Invoice total</span>
+          <span className="font-semibold tabular-nums">{format(invoice.total)}</span>
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Paid now (optional)</label>
+          <NumericInput min={0} max={invoice.total} value={initialAmount} onChange={setInitialAmount} />
+          <div className="mt-1.5 flex gap-2 text-xs">
+            <button type="button" className="text-brand-dark hover:underline" onClick={() => setInitialAmount(invoice.total)}>Paid in full</button>
+            {initialAmount > 0 && initialAmount < invoice.total && (
+              <span className="text-ink-soft">· {format(invoice.total - initialAmount)} left to collect</span>
+            )}
+          </div>
+        </div>
+        {initialAmount > 0 && (
+          <>
+            <div>
+              <label className="block text-sm font-medium mb-1">Received into</label>
+              <PaymentAccountSelect value={initialAccountId} onChange={setInitialAccountId} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium mb-1">Method</label>
+                <select
+                  value={initialMethod}
+                  onChange={(e) => setInitialMethod(e.target.value)}
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
+                >
+                  <option value="cash">Cash</option>
+                  <option value="bank_transfer">Bank Transfer</option>
+                  <option value="mobile">Mobile Payment</option>
+                  <option value="card">Card</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Reference</label>
+                <input
+                  value={initialReference}
+                  onChange={(e) => setInitialReference(e.target.value)}
+                  placeholder="Optional"
+                  className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand"
+                />
+              </div>
+            </div>
+          </>
+        )}
+        {finalizeError && <p className="text-sm text-danger" role="alert">{finalizeError}</p>}
       </Dialog>
     </div>
   );

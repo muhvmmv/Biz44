@@ -29,14 +29,18 @@ export interface StockIssue {
 }
 
 export async function runStockCheck(companyId: string) {
-  const [products, defaultLocation, inventoryAccount] = await Promise.all([
+  const [products, defaultLocation, stockAccounts, wipAccount, openOrders] = await Promise.all([
     prisma.product.findMany({
       where: { companyId },
       select: { id: true, name: true, sku: true, quantity: true, totalCostValue: true, cost: true },
       orderBy: { name: 'asc' },
     }),
     prisma.location.findFirst({ where: { companyId, isDefault: true }, select: { id: true, name: true } }),
-    prisma.account.findFirst({ where: { companyId, systemKey: 'inventory' }, select: { balance: true } }),
+    // Stock in batches is valued in the raw-materials and finished-goods accounts.
+    prisma.account.findMany({ where: { companyId, systemKey: { in: ['inventory', 'inventory_raw'] } }, select: { balance: true } }),
+    // Work in progress is the material cost sitting in running production orders.
+    prisma.account.findFirst({ where: { companyId, systemKey: 'inventory_wip' }, select: { balance: true } }),
+    prisma.productionOrder.aggregate({ where: { companyId, status: 'in_progress' }, _sum: { materialCost: true } }),
   ]);
 
   const totals = await stockByProduct(prisma, companyId, null);
@@ -91,7 +95,7 @@ export async function runStockCheck(companyId: string) {
     batchValueTotal += t.value;
     const hasAnyBatch = hasBatches.has(p.id);
 
-    if (p.quantity !== t.quantity) {
+    if (Math.abs(p.quantity - t.quantity) > 0.0001) {
       if (!hasAnyBatch && p.quantity > 0) {
         issues.push({
           type: 'stock_without_batches',
@@ -138,7 +142,9 @@ export async function runStockCheck(companyId: string) {
     };
   });
 
-  const inventoryAccountBalance = round2(inventoryAccount?.balance ?? 0);
+  const inventoryAccountBalance = round2(stockAccounts.reduce((sum, a) => sum + a.balance, 0));
+  const wipAccountBalance = round2(wipAccount?.balance ?? 0);
+  const wipOrdersValue = round2(openOrders._sum.materialCost ?? 0);
   batchValueTotal = round2(batchValueTotal);
 
   return {
@@ -153,6 +159,9 @@ export async function runStockCheck(companyId: string) {
       inventoryAccountBalance,
       // Accounting difference — informational until the ledger rework (Phase 2).
       inventoryAccountDifference: round2(inventoryAccountBalance - batchValueTotal),
+      wipAccountBalance,
+      wipOrdersValue,
+      wipDifference: round2(wipAccountBalance - wipOrdersValue),
     },
     issues,
     products: rows,
