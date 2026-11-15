@@ -11,6 +11,7 @@ import { postJournal, systemAccount, round2 } from '../../lib/ledger';
 import { addStock, consumeFifo, restoreToBatch, syncProductTotals, inventoryAccountFor } from '../../lib/inventory';
 import { invoiceBalance } from '../../lib/invoiceBalance';
 import { createCreditNote, creditableLines } from './creditNotes';
+import { applyDeposit, applyOrderDeposits } from '../../lib/deposits';
 const router = Router();
 
 router.use(authenticate);
@@ -66,6 +67,16 @@ function invoiceTotals(items: { quantity: number; unitPrice: number }[], body: a
   const net = round2(subtotal - discountTotal);
   const taxTotal = round2((net * taxRate) / 100);
   return { subtotal, discountTotal, taxRate, taxTotal, total: round2(net + taxTotal) };
+}
+
+/** An invoice can bill a production order; a customer order must be invoiced to its customer. */
+async function checkProductionOrder(companyId: string, value: unknown, customerId: unknown): Promise<string | null> {
+  if (!value) return null;
+  const order = await prisma.productionOrder.findFirst({ where: { id: String(value), companyId } });
+  if (!order) throw notFound('Production order not found');
+  if (order.status === 'cancelled') throw badRequest('That production order is cancelled');
+  if (order.customerId && order.customerId !== customerId) throw badRequest('That production order is for a different customer');
+  return order.id;
 }
 
 async function companyVatRate(companyId: string) {
@@ -153,8 +164,13 @@ async function validateInvoiceInput(companyId: string, body: any): Promise<Clean
 
   const productIds = Array.from(new Set(clean.map((c) => c.productId).filter(Boolean))) as string[];
   if (productIds.length > 0) {
-    const owned = await prisma.product.count({ where: { id: { in: productIds }, companyId } });
-    if (owned !== productIds.length) throw notFound('One or more products were not found');
+    const owned = await prisma.product.findMany({ where: { id: { in: productIds }, companyId }, select: { name: true, itemType: true } });
+    if (owned.length !== productIds.length) throw notFound('One or more products were not found');
+    // Only finished goods are sold. Raw materials and packaging are used in production.
+    const notForSale = owned.find((p) => p.itemType !== 'finished_good');
+    if (notForSale) {
+      throw badRequest(`"${notForSale.name}" is a ${notForSale.itemType === 'packaging' ? 'packaging item' : 'raw material'} and cannot be sold. Only finished goods can be invoiced.`);
+    }
   }
   return clean;
 }
@@ -181,6 +197,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
         items: { include: { product: { select: { name: true, sku: true, unit: true } } } },
         payments: true,
         creditNotes: { include: { lines: true }, orderBy: { createdAt: 'asc' } },
+        productionOrder: { select: { id: true, number: true } },
       },
     });
     if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
@@ -199,6 +216,7 @@ router.post('/', resolveLocation, async (req: Request, res: Response, next: Next
     const items = await validateInvoiceInput(companyId, req.body);
 
     const { subtotal, discountTotal, taxRate, taxTotal, total } = invoiceTotals(items, req.body, await companyVatRate(companyId));
+    const productionOrderId = await checkProductionOrder(companyId, req.body?.productionOrderId, customerId);
 
     const locationId = requireTargetLocation(req);
 
@@ -224,6 +242,7 @@ router.post('/', resolveLocation, async (req: Request, res: Response, next: Next
             taxRate,
             taxTotal,
             total,
+            productionOrderId,
             notes,
             dueDate: dueDate ? new Date(dueDate) : null,
             items: {
@@ -266,6 +285,9 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
     } = req.body;
     const items = await validateInvoiceInput(existing.companyId, req.body);
 
+    const productionOrderId = req.body?.productionOrderId === undefined
+      ? existing.productionOrderId
+      : await checkProductionOrder(existing.companyId, req.body.productionOrderId, customerId);
     // A draft keeps its own rate unless a new one is sent.
     const { subtotal, discountTotal, taxRate, taxTotal, total } = invoiceTotals(items, req.body, existing.taxRate);
 
@@ -286,6 +308,7 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
         taxRate,
         taxTotal,
         total,
+        productionOrderId,
         items: {
           create: items.map((it) => ({
             productId: it.productId,
@@ -387,6 +410,9 @@ router.post('/:id/finalize', async (req: Request, res: Response, next: NextFunct
         ],
       });
 
+      // Deposits taken on the production order this invoice bills.
+      await applyOrderDeposits(tx, invoice, req.user!.id);
+
       if (initialAmount > 0 && initialAccount) {
         await recordInvoicePayment(tx, {
           invoice, amount: initialAmount, account: initialAccount, method: initial.method,
@@ -457,6 +483,9 @@ router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunctio
     if (!invoice) return res.status(404).json({ success: false, message: 'Not found' });
     if (invoice.status === 'cancelled') {
       return res.status(400).json({ success: false, message: 'Already cancelled' });
+    }
+    if (await prisma.payment.count({ where: { invoiceId: invoice.id, depositId: { not: null } } })) {
+      throw badRequest('A customer deposit was used to pay this invoice. Use a credit note instead of cancelling it.');
     }
     if ((invoice.creditedAmount ?? 0) > 0) {
       throw badRequest('This invoice has credit notes. Credit the remaining items with a new credit note instead of cancelling it.');
@@ -563,6 +592,23 @@ router.post('/:id/cancel', async (req: Request, res: Response, next: NextFunctio
     });
 
     res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// ---------- APPLY A CUSTOMER DEPOSIT ----------
+router.post('/:id/apply-deposit', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const companyId = req.user!.companyId;
+    const invoice = await prisma.invoice.findFirst({ where: { id: req.params.id, companyId } });
+    if (!invoice) throw notFound('Invoice not found');
+    if (!invoice.finalizedAt || ['draft', 'cancelled'].includes(invoice.status)) throw badRequest('Only an open, finalized invoice can be paid from a deposit');
+    const deposit = await prisma.customerDeposit.findFirst({ where: { id: String(req.body?.depositId ?? ''), companyId } });
+    if (!deposit) throw notFound('Deposit not found');
+    if (deposit.customerId !== invoice.customerId) throw badRequest('That deposit is from a different customer');
+    const max = req.body?.amount === undefined || req.body?.amount === '' ? undefined : parsePositiveAmount(req.body.amount, 'Amount');
+    const applied = await prisma.$transaction((tx) => applyDeposit(tx, { deposit, invoice, max, userId: req.user!.id }));
+    if (!(applied > 0)) throw badRequest('Nothing to apply: the deposit is used up or the invoice is paid');
+    res.json({ success: true, data: { applied } });
   } catch (err) { next(err); }
 });
 

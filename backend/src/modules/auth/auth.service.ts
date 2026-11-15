@@ -178,6 +178,7 @@ export class AuthService {
       role: user.role,
       companyId: user.companyId,
       businessType: user.company?.businessType ?? null,
+      companyName: user.company?.name ?? null,
       currency: user.company?.currency ?? 'USD',
       permissions: permissionsFor(user.role),
     };

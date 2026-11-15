@@ -1,3 +1,6 @@
+import { AppError } from '../../lib/errors';
+import { can } from '../../lib/permissions';
+import { prepareDeposit, recordDeposit } from '../../lib/deposits';
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { resolveLocation, locationWhere, requireTargetLocation, guardRecordLocation, reportLocationIds } from '../../middleware/locationAuth';
@@ -49,7 +52,21 @@ router.get('/orders', resolveLocation, wrap(async (req, res) => {
 }));
 router.get('/orders/:orderId', wrap(async (req, res) => ok(res, await production.getOrder(req.user!.companyId, req.params.orderId))));
 router.post('/orders', resolveLocation, wrap(async (req, res) => {
-  const order = await production.createOrder(req.user!.companyId, req.user!.id, requireTargetLocation(req), req.body ?? {});
+  const companyId = req.user!.companyId;
+  const locationId = requireTargetLocation(req);
+  // A deposit (or full payment) taken with the order is money in: it needs
+  // a role that records customer payments, and is checked before the order is saved.
+  const deposit = req.body?.deposit;
+  const takesDeposit = deposit && deposit.amount !== undefined && deposit.amount !== '' && Number(deposit.amount) > 0;
+  if (takesDeposit && !can(req.user!.role, 'sales', 'write') && !can(req.user!.role, 'money', 'write')) {
+    throw new AppError(403, 'Your role cannot record customer payments. Ask a sales or accounts colleague to record the deposit.');
+  }
+  if (takesDeposit && !req.body?.customerId) throw badRequest('Choose the customer to take a deposit');
+  const prepared = takesDeposit ? await prepareDeposit(companyId, { ...deposit, customerId: req.body.customerId }) : null;
+  const order = await production.createOrder(companyId, req.user!.id, locationId, req.body ?? {});
+  if (prepared) {
+    await prisma.$transaction((tx) => recordDeposit(tx, companyId, req.user!.id, locationId, { ...prepared, order }));
+  }
   ok(res, order, 201);
 }));
 router.put('/orders/:orderId', wrap(async (req, res) => {
