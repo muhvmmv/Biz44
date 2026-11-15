@@ -57,7 +57,8 @@ export function useTheme(): ThemeApi {
 /** Colours for charts (SVG attributes can't read CSS variables reliably). */
 export function useChartColors() {
   const { theme } = useTheme();
+  // Monochrome: the brand orange is kept for the cash & bank card and the logo.
   return theme === "dark"
-    ? { grid: "#26262D", axis: "#8E8E96", label: "#C4C4CC", tooltipBg: "#1B1B20", tooltipBorder: "#2E2E36", brand: "#FF6A33", strong: "#E4E4E7", muted: "#52525B", blue: "#60A5FA", green: "#4ADE80", teal: "#2DD4BF", violet: "#A78BFA", palette: ["#FF6A33", "#E4E4E7", "#60A5FA", "#4ADE80", "#A78BFA", "#2DD4BF", "#FBBF24", "#71717A"] }
-    : { grid: "#ECECEF", axis: "#8E8E96", label: "#55555C", tooltipBg: "#FFFFFF", tooltipBorder: "#E6E6EA", brand: "#F05A28", strong: "#1C1C1F", muted: "#D4D4DA", blue: "#3B82F6", green: "#16A34A", teal: "#0D9488", violet: "#7C3AED", palette: ["#F05A28", "#1C1C1F", "#3B82F6", "#16A34A", "#7C3AED", "#0D9488", "#D97706", "#A1A1AA"] };
+    ? { grid: "#26262D", axis: "#8E8E96", label: "#C4C4CC", tooltipBg: "#1B1B20", tooltipBorder: "#2E2E36", brand: "#F4F4F5", strong: "#F4F4F5", mid: "#9A9AA2", muted: "#46464D", blue: "#C4C4CC", green: "#C4C4CC", teal: "#9A9AA2", violet: "#9A9AA2", palette: ["#F4F4F5", "#C4C4CC", "#9A9AA2", "#6E6E76", "#46464D", "#2E2E35"] }
+    : { grid: "#ECECEF", axis: "#8E8E96", label: "#55555C", tooltipBg: "#FFFFFF", tooltipBorder: "#E6E6EA", brand: "#1C1C1F", strong: "#1C1C1F", mid: "#7A7A82", muted: "#D4D4DA", blue: "#4B4B52", green: "#4B4B52", teal: "#7A7A82", violet: "#7A7A82", palette: ["#1C1C1F", "#4B4B52", "#7A7A82", "#A8A8B0", "#D0D0D6", "#E6E6EA"] };
 }
