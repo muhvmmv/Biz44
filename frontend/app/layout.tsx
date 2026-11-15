@@ -17,7 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Apply the saved theme inside the app before first paint (no flash). */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{if(location.pathname==='/'||location.pathname.indexOf('/dashboard')===0){var t=localStorage.getItem('biz44_theme');if(t!=='light'&&t!=='dark'){t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}document.documentElement.dataset.theme=t}}catch(e){}`,
+            __html: `try{if(location.pathname==='/'||location.pathname.indexOf('/dashboard')===0||location.pathname.indexOf('/auth')===0){var t=localStorage.getItem('biz44_theme');if(t!=='light'&&t!=='dark'){t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}document.documentElement.dataset.theme=t}}catch(e){}`,
           }}
         />
       </head>

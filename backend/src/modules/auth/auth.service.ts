@@ -4,7 +4,7 @@ import { env } from '../../config/env';
 import { DEFAULT_ACCOUNT_KEYS, SYSTEM_ACCOUNTS } from '../../lib/ledger';
 
 import { prisma } from '../../lib/prisma';
-import { badRequest } from '../../lib/errors';
+import { AppError, badRequest } from '../../lib/errors';
 import { permissionsFor } from '../../lib/permissions';
 
 export interface RegisterInput {
@@ -21,9 +21,22 @@ export interface LoginInput {
 }
 
 export class AuthService {
-  async register(data: RegisterInput) {
-    const existing = await prisma.user.findUnique({ where: { email: data.email } });
-    if (existing) throw new Error('Email already registered');
+  async register(input: RegisterInput) {
+    const clean = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+    const data = {
+      firstName: clean(input.firstName),
+      lastName: clean(input.lastName),
+      email: clean(input.email).toLowerCase(),
+      password: typeof input.password === 'string' ? input.password : '',
+      company: clean(input.company) || undefined,
+    };
+    if (!data.firstName || !data.lastName) throw badRequest('Enter your first and last name');
+    if (data.firstName.length > 80 || data.lastName.length > 80) throw badRequest('Name is too long');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) throw badRequest('Enter a valid email address');
+    if (data.password.length < 8) throw badRequest('The password must be at least 8 characters');
+    if (data.company && data.company.length > 120) throw badRequest('Company name is too long');
+    const existing = await prisma.user.findFirst({ where: { email: { equals: data.email, mode: 'insensitive' } } });
+    if (existing) throw badRequest('An account with this email already exists. Sign in instead.');
 
     const hashedPassword = await bcrypt.hash(data.password, 12);
     const companyName = data.company || `${data.firstName} ${data.lastName}'s Company`;
@@ -92,11 +105,11 @@ export class AuthService {
       where: { email: { equals: email, mode: 'insensitive' } },
       include: { company: true },
     });
-    if (!user) throw new Error('Invalid email or password');
+    if (!user) throw new AppError(401, 'Incorrect email or password');
 
     const valid = await bcrypt.compare(data.password, user.password);
-    if (!valid) throw new Error('Invalid email or password');
-    if (!user.isActive) throw new Error('This account has been deactivated. Ask your administrator.');
+    if (!valid) throw new AppError(401, 'Incorrect email or password');
+    if (!user.isActive) throw new AppError(403, 'This account has been deactivated. Ask your administrator.');
 
     // Safety net: if the user somehow has no location access yet, grant them
     // access to the company's default location.
