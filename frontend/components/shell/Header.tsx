@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  Menu, Search, Plus, Bell, ChevronDown, MapPin, Check, Settings, LogOut, UserRound, Users, Building2, AlertTriangle, AlertCircle, Info, Factory, ShoppingBag,
+  Menu, Plus, Bell, ChevronDown, MapPin, Check, Settings, LogOut, UserRound, Users, Building2, AlertTriangle, AlertCircle, Info, Factory, ShoppingBag,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useAlerts } from "@/hooks/useAlerts";
@@ -19,42 +18,25 @@ export type { Alert } from "@/hooks/useAlerts";
 
 export default function Header({
   onOpenMenu,
-  onOpenSearch,
   roomy = true,
 }: {
   pathname: string;
   /** False while the full sidebar panel is open (less width for labels). */
   roomy?: boolean;
   onOpenMenu: () => void;
-  onOpenSearch: () => void;
+  /** Kept for callers; search now lives in the sidebar. */
+  onOpenSearch?: () => void;
 }) {
   const { user } = useAuth();
-  const [isMac, setIsMac] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setIsMac(/Mac|iPhone|iPad/.test(navigator.platform)), 0);
-    return () => clearTimeout(t);
-  }, []);
   const canProduce = can(user?.permissions, "inventory", "write");
   const canSell = can(user?.permissions, "sales", "write");
 
   return (
     <header className="sticky top-0 z-30 flex h-[72px] items-center gap-2 bg-ivory/70 px-4 backdrop-blur-xl supports-[backdrop-filter]:bg-ivory/55 sm:gap-3 sm:px-6 lg:px-8">
-      {/* Left: menu + search */}
+      {/* Left: menu (phones and tablets). Search lives in the sidebar (and ⌘K / Ctrl K). */}
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <button onClick={onOpenMenu} className="-ml-1 shrink-0 rounded-xl p-2 text-ink-soft hover:bg-surface hover:text-ink lg:hidden" aria-label="Open menu">
           <Menu size={20} />
-        </button>
-        <button
-          onClick={onOpenSearch}
-          className="hidden h-11 w-full min-w-0 max-w-xs items-center gap-2 rounded-full border border-border-soft bg-surface/80 px-4 text-sm text-ink-faint shadow-card transition-all hover:border-border-strong hover:shadow-raised md:flex"
-          aria-label="Search"
-        >
-          <Search size={16} className="shrink-0" />
-          <span className="flex-1 truncate text-left">Search…</span>
-          <kbd className="hidden rounded-md border border-border-soft bg-surface-muted px-1.5 text-[11px] text-ink-soft xl:inline">{isMac ? "⌘K" : "Ctrl K"}</kbd>
-        </button>
-        <button onClick={onOpenSearch} className="shrink-0 rounded-xl p-2 text-ink-soft hover:bg-surface hover:text-ink md:hidden" aria-label="Search">
-          <Search size={20} />
         </button>
       </div>
 
@@ -66,10 +48,11 @@ export default function Header({
             aria-label="New production order"
             title="New production order"
             className={cn(
-              "flex h-10 w-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-surface-muted text-sm font-semibold text-ink transition-colors hover:bg-border-soft lg:w-36",
+              "group relative flex h-10 w-10 shrink-0 items-center justify-center gap-2 overflow-hidden whitespace-nowrap rounded-full text-sm font-bold lg:w-36 bg-gradient-to-br from-orange-400 via-orange-500 to-orange-600 text-white shadow-[0_6px_16px_-6px_rgb(240_90_40/0.65)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_22px_-6px_rgb(240_90_40/0.75)]",
               roomy ? "xl:w-40" : "2xl:w-40"
             )}
           >
+            <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-700 group-hover:translate-x-full" aria-hidden="true" />
             <Factory size={16} className="shrink-0" />
             <span className="hidden lg:inline">{roomy ? "Production order" : "Production"}</span>
           </Link>
@@ -79,11 +62,11 @@ export default function Header({
           <Link
             href="/dashboard/invoices/new"
             className={cn(
-              "group relative flex h-10 w-10 shrink-0 items-center justify-center gap-2 overflow-hidden whitespace-nowrap rounded-full bg-charcoal text-sm sm:w-auto sm:px-4 font-extrabold tracking-wide text-ivory transition-colors hover:bg-charcoal-dark lg:w-36 lg:px-0",
+              "group relative flex h-10 w-10 shrink-0 items-center justify-center gap-2 overflow-hidden whitespace-nowrap rounded-full text-sm font-extrabold tracking-wide sm:w-auto sm:px-4 lg:w-36 lg:px-0 bg-gradient-to-br from-orange-400 via-orange-500 to-orange-600 text-white shadow-[0_6px_16px_-6px_rgb(240_90_40/0.65)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_22px_-6px_rgb(240_90_40/0.75)]",
               roomy ? "xl:w-40" : "2xl:w-40"
             )}
           >
-            <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full" aria-hidden="true" />
+            <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-700 group-hover:translate-x-full" aria-hidden="true" />
             <ShoppingBag size={16} className="shrink-0" />
             <span className="sr-only sm:not-sr-only">SELL</span>
           </Link>

@@ -431,9 +431,9 @@ function PerformanceChart({ data, format, symbol }: { data: MonthRow[]; format: 
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const rows = data.map((m) => ({ month: monthLabel(m.month), Sales: m.revenue, Expenses: m.cogs + m.opex, Profit: m.netProfit }));
   const series = [
-    { key: "Sales", color: c.strong },
-    { key: "Expenses", color: c.muted },
-    { key: "Profit", color: c.mid },
+    { key: "Sales", color: c.blue },
+    { key: "Expenses", color: c.red },
+    { key: "Profit", color: c.strong },
   ];
   const toggle = (k: string) => setHidden((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   return (
@@ -465,8 +465,12 @@ function PerformanceChart({ data, format, symbol }: { data: MonthRow[]; format: 
             <ComposedChart data={rows} margin={{ top: 8, right: 4, bottom: 0, left: -8 }} barGap={4}>
               <defs>
                 <linearGradient id="bar-sales" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={c.strong} stopOpacity={1} />
-                  <stop offset="100%" stopColor={c.strong} stopOpacity={0.7} />
+                  <stop offset="0%" stopColor={c.blue} stopOpacity={1} />
+                  <stop offset="100%" stopColor={c.blue} stopOpacity={0.7} />
+                </linearGradient>
+                <linearGradient id="bar-expenses" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={c.red} stopOpacity={0.95} />
+                  <stop offset="100%" stopColor={c.red} stopOpacity={0.65} />
                 </linearGradient>
               </defs>
               <CartesianGrid stroke={c.grid} strokeDasharray="4 6" vertical={false} />
@@ -474,9 +478,9 @@ function PerformanceChart({ data, format, symbol }: { data: MonthRow[]; format: 
               <YAxis tickLine={false} axisLine={false} tick={{ fill: c.axis, fontSize: 11 }} tickFormatter={(v: number) => compact(symbol, v)} width={56} />
               <Tooltip cursor={{ fill: c.grid, opacity: 0.5, radius: 8 } as object} content={<ChartTooltip format={format} />} />
               {!hidden.has("Sales") && <Bar dataKey="Sales" fill="url(#bar-sales)" radius={[8, 8, 3, 3]} maxBarSize={26} animationDuration={1100} />}
-              {!hidden.has("Expenses") && <Bar dataKey="Expenses" fill={c.muted} radius={[8, 8, 3, 3]} maxBarSize={26} animationDuration={1100} animationBegin={150} />}
+              {!hidden.has("Expenses") && <Bar dataKey="Expenses" fill="url(#bar-expenses)" radius={[8, 8, 3, 3]} maxBarSize={26} animationDuration={1100} animationBegin={150} />}
               {!hidden.has("Profit") && (
-                <Line type="monotone" dataKey="Profit" stroke={c.mid} strokeWidth={2.5} strokeDasharray="6 4" dot={{ r: 3, strokeWidth: 0, fill: c.mid }} activeDot={{ r: 5 }} animationDuration={1500} animationBegin={300} />
+                <Line type="monotone" dataKey="Profit" stroke={c.strong} strokeWidth={2.5} dot={{ r: 3.5, strokeWidth: 2, stroke: c.tooltipBg, fill: c.strong }} activeDot={{ r: 5 }} animationDuration={1500} animationBegin={300} />
               )}
             </ComposedChart>
           </ResponsiveContainer>
