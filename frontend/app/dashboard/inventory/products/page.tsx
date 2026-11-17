@@ -17,6 +17,7 @@ import { Card, CardContent } from "@/components/ui/Card";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useOpenOnQuery } from "@/hooks/useOpenOnQuery";
 import { useLocationVersion } from "@/hooks/useLocationRefetch";
+import { useLocation } from "@/hooks/useLocation";
 import { ITEM_TYPES, UNITS, ItemType, formatQty, itemTypeLabel } from "@/lib/units";
 
 interface Product {
@@ -48,6 +49,8 @@ export default function ProductsPage() {
   const { format } = useCurrency();
   const router = useRouter();
   const version = useLocationVersion();
+  // A store only keeps finished goods to sell.
+  const { manufacturing } = useLocation();
   const [products, setProducts] = useState<Product[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -125,7 +128,9 @@ export default function ProductsPage() {
     for (const t of ITEM_TYPES) c[t.value] = products?.filter((p) => p.itemType === t.value).length ?? 0;
     return c;
   }, [products]);
-  const rows = products ? products.filter((p) => filter === "all" || p.itemType === filter) : null;
+  const rows = products
+    ? products.filter((p) => (manufacturing ? filter === "all" || p.itemType === filter : p.itemType === "finished_good"))
+    : null;
   const stockValue = (rows ?? []).reduce((s, p) => s + p.totalCostValue, 0);
 
   const columns: Column<Product>[] = [
@@ -186,7 +191,9 @@ export default function ProductsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Products"
-        description="Raw materials, packaging and finished goods. Stock and value come from stock batches at the selected location."
+        description={manufacturing
+          ? "Raw materials, packaging and finished goods. Stock and value come from stock batches at the selected location."
+          : "The goods this store sells. Stock arrives from a factory through transfers."}
         actions={<Button onClick={openNew}><Plus size={16} /> Add product</Button>}
       />
 
@@ -201,7 +208,7 @@ export default function ProductsPage() {
       )}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Tabs
+        {manufacturing ? <Tabs
           value={filter}
           onChange={setFilter}
           options={[
@@ -210,7 +217,7 @@ export default function ProductsPage() {
             { value: "raw_material", label: "Raw materials", count: counts.raw_material },
             { value: "packaging", label: "Packaging", count: counts.packaging },
           ]}
-        />
+        /> : <span />}
         <p className="text-sm text-ink-soft">Stock value shown: <span className="font-semibold text-ink tabular-nums">{format(stockValue)}</span></p>
       </div>
 

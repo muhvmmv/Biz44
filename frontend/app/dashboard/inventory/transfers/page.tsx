@@ -74,9 +74,16 @@ export default function TransfersPage() {
   }, [open, fromId]);
 
   const openNew = () => {
-    const from = activeLocationId !== "all" ? activeLocationId : locations[0]?.id ?? "";
-    setFromId(from);
-    setToId(locations.find((l) => l.id !== from)?.id ?? "");
+    const here = locations.find((l) => l.id === activeLocationId);
+    if (here?.kind === "store") {
+      // At a store: stock comes in from a factory.
+      setToId(here.id);
+      setFromId(locations.find((l) => l.id !== here.id && l.kind !== "store")?.id ?? locations.find((l) => l.id !== here.id)?.id ?? "");
+    } else {
+      const from = activeLocationId !== "all" ? activeLocationId : locations[0]?.id ?? "";
+      setFromId(from);
+      setToId(locations.find((l) => l.id !== from)?.id ?? "");
+    }
     setNotes("");
     setLines([{ productId: "", quantity: 0 }]);
     setFormError("");
@@ -179,12 +186,12 @@ export default function TransfersPage() {
         <div className="grid grid-cols-2 gap-3">
           <Field label="From">
             <Select value={fromId} onChange={(e) => { if (e.target.value !== fromId) { setFromId(e.target.value); setLines([{ productId: "", quantity: 0 }]); } }}>
-              {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              {locations.map((l) => <option key={l.id} value={l.id}>{l.name} ({l.kind === "store" ? "store" : "factory"})</option>)}
             </Select>
           </Field>
           <Field label="To">
             <Select value={toId} onChange={(e) => setToId(e.target.value)}>
-              {locations.filter((l) => l.id !== fromId).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              {locations.filter((l) => l.id !== fromId).map((l) => <option key={l.id} value={l.id}>{l.name} ({l.kind === "store" ? "store" : "factory"})</option>)}
             </Select>
           </Field>
         </div>

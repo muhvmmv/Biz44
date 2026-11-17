@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
@@ -17,6 +17,13 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // Shown after someone deletes their account (/auth/login?deleted=...).
+  const [deleted, setDeleted] = useState<string | null>(null);
+  useEffect(() => {
+    const kind = new URLSearchParams(window.location.search).get("deleted");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read once from the URL after mount
+    if (kind === "account" || kind === "company") setDeleted(kind);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,6 +61,11 @@ export default function LoginPage() {
         <div className="flex justify-end">
           <Link href="/auth/forgot-password" className="text-sm font-medium text-ink-soft hover:text-ink hover:underline">Forgot password?</Link>
         </div>
+        {deleted && (
+          <p className="rounded-xl bg-surface-muted px-3.5 py-2.5 text-sm text-ink" role="status">
+            {deleted === "company" ? "Your company and all of its records have been deleted." : "Your account has been deleted. Your name and email were removed."}
+          </p>
+        )}
         {error && <p className="rounded-xl bg-danger-soft px-3.5 py-2.5 text-sm text-danger" role="alert">{error}</p>}
         <button type="submit" disabled={submitting || !email || !password} className={authPrimary}>
           {submitting ? "Signing in…" : <>Sign in <ArrowRight size={16} className="transition-transform group-hover:translate-x-0.5" /></>}

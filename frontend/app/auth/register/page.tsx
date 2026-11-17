@@ -91,6 +91,11 @@ export default function RegisterPage() {
         <button type="submit" disabled={submitting} className={authPrimary}>
           {submitting ? "Creating your company…" : <>Create company <ArrowRight size={16} className="transition-transform group-hover:translate-x-0.5" /></>}
         </button>
+        <p className="text-center text-xs leading-relaxed text-ink-soft">
+          By creating a company you agree to the{" "}
+          <Link href="/terms" className="font-semibold text-ink hover:underline">Terms of Service</Link> and{" "}
+          <Link href="/privacy" className="font-semibold text-ink hover:underline">Privacy Policy</Link>.
+        </p>
       </form>
     </AuthLayout>
   );

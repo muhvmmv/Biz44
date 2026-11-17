@@ -1,5 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { randomBytes } from 'crypto';
+import { eraseCompany } from '../../lib/companyErase';
 import { env } from '../../config/env';
 import { DEFAULT_ACCOUNT_KEYS, SYSTEM_ACCOUNTS } from '../../lib/ledger';
 
@@ -172,6 +174,60 @@ export class AuthService {
     if (!(await bcrypt.compare(currentPassword, user.password))) throw badRequest('Your current password is not correct');
     if (await bcrypt.compare(newPassword, user.password)) throw badRequest('Choose a password different from the current one');
     await prisma.user.update({ where: { id: userId }, data: { password: await bcrypt.hash(newPassword, 12) } });
+  }
+
+  /**
+   * Delete the signed-in person's account.
+   *  - Their name, email and password are erased and they can no longer sign
+   *    in. Invoices, payments and other records they made stay with the
+   *    company (the books must not change), now shown as "Deleted user".
+   *  - With deleteCompany (administrators only), the whole company and all of
+   *    its records are removed for good.
+   */
+  async deleteAccount(userId: string, body: { password?: unknown; deleteCompany?: unknown; companyName?: unknown }) {
+    if (typeof body.password !== 'string' || !body.password) throw badRequest('Enter your password to confirm');
+    const user = await prisma.user.findUnique({ where: { id: userId }, include: { company: true } });
+    if (!user || user.deletedAt) throw new AppError(404, 'Account not found');
+    if (!(await bcrypt.compare(body.password, user.password))) throw badRequest('Your password is not correct');
+
+    const others = { companyId: user.companyId, isActive: true, deletedAt: null, id: { not: user.id } };
+
+    if (body.deleteCompany === true) {
+      if (user.role !== 'admin') throw new AppError(403, 'Only an administrator can delete the company');
+      const typed = typeof body.companyName === 'string' ? body.companyName.trim().toLowerCase() : '';
+      if (typed !== user.company.name.trim().toLowerCase()) {
+        throw badRequest('Type the company name exactly as shown to confirm');
+      }
+      await prisma.$transaction((tx) => eraseCompany(tx, user.companyId), { timeout: 120_000 });
+      return { deleted: 'company' as const };
+    }
+
+    const [othersActive, otherAdmins] = await Promise.all([
+      prisma.user.count({ where: others }),
+      prisma.user.count({ where: { ...others, role: 'admin' } }),
+    ]);
+    if (othersActive === 0) {
+      throw badRequest(`You are the only person using ${user.company.name}. To delete your account, delete the company.`);
+    }
+    if (user.role === 'admin' && otherAdmins === 0) {
+      throw badRequest('You are the only administrator. Make another team member an administrator first (Settings → Team), or delete the company.');
+    }
+
+    await prisma.$transaction([
+      prisma.userLocationAccess.deleteMany({ where: { userId: user.id } }),
+      prisma.user.update({
+        where: { id: user.id },
+        data: {
+          firstName: 'Deleted',
+          lastName: 'user',
+          email: `deleted-${user.id}@deleted.invalid`,
+          password: await bcrypt.hash(randomBytes(32).toString('hex'), 12),
+          isActive: false,
+          deletedAt: new Date(),
+        },
+      }),
+    ]);
+    return { deleted: 'user' as const };
   }
 
   private generateToken(user: { id: string; email: string; role: string; companyId: string }) {

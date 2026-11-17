@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { AnimatePresence, motion, useReducedMotion, useScroll, useTransform } from "framer-motion";
 import {
-  ArrowRight, BadgeCheck, Boxes, Building2, Calculator, Factory, FileText, Layers, LockKeyhole, Moon,
+  ArrowRight, BadgeCheck, Boxes, Building2, Calculator, Factory, FileText, Layers, LayoutGrid, LockKeyhole, Moon,
   PackageCheck, Receipt, Scale, ShieldCheck, ShoppingCart, Sun, Truck, Users, Wallet,
 } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
@@ -154,7 +154,7 @@ function Hero() {
       <div className="mx-auto max-w-4xl text-center">
         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
           <span className="inline-flex items-center gap-2 rounded-full border border-border-soft bg-surface/80 px-3.5 py-1.5 text-xs font-semibold text-ink-soft shadow-card">
-            <Factory size={14} /> Business management for manufacturers
+            <LayoutGrid size={14} /> The ultimate business management tool
           </span>
         </motion.div>
         <motion.h1
@@ -163,7 +163,7 @@ function Hero() {
           transition={{ delay: 0.18, type: "spring", stiffness: 110, damping: 18 }}
           className="mt-6 text-[40px] font-bold leading-[1.05] tracking-tight sm:text-6xl lg:text-7xl"
         >
-          From raw materials<br className="hidden sm:block" /> to profit, in one place.
+          Run your entire business<br className="hidden sm:block" /> from one place.
         </motion.h1>
         <motion.p
           initial={{ opacity: 0, y: 18 }}
@@ -171,8 +171,8 @@ function Hero() {
           transition={{ delay: 0.28 }}
           className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-ink-soft"
         >
-          Biz44 records what you buy, what you make and what you sell, and keeps your books balanced as you go.
-          Every number on the dashboard comes from the transactions you enter.
+          Biz44 records what you buy, sell and make, tracks stock and money across every branch,
+          and keeps your books balanced as you go. Every number on the dashboard comes from the transactions you enter.
         </motion.p>
         <motion.div
           initial={{ opacity: 0, y: 18 }}
@@ -202,7 +202,7 @@ function Hero() {
         <motion.div style={{ rotateX, scale, y }} initial={{ opacity: 0, y: 60 }} animate={{ opacity: 1 }} transition={{ delay: 0.45, duration: 0.8 }} className="origin-top">
           <Frame><Shot name="dashboard" alt="The Biz44 dashboard: cash and bank balances, sales, profit and what needs attention" priority /></Frame>
         </motion.div>
-        <FloatingNote className="-left-2 top-[22%] hidden lg:flex" delay={1.1} icon={<Factory size={15} />} title="Cost per bag" text="from the batches actually used" />
+        <FloatingNote className="-left-2 top-[22%] hidden lg:flex" delay={1.1} icon={<Layers size={15} />} title="Cost per unit" text="from the batches actually used" />
         <FloatingNote className="-right-4 top-[48%] hidden lg:flex" delay={1.3} icon={<Wallet size={15} />} title="Deposits" text="applied when you invoice" />
         <FloatingNote className="bottom-[10%] left-[18%] hidden lg:flex" delay={1.5} icon={<Scale size={15} />} title="Books balance" text="on every transaction" />
       </div>
@@ -230,8 +230,8 @@ function FloatingNote({ className, delay, icon, title, text }: { className?: str
 // ---------------------------------------------------------------- modules strip
 function Modules() {
   const items: [ReactNode, string][] = [
-    [<Factory key="f" size={16} />, "Production"], [<Boxes key="b" size={16} />, "Inventory"], [<ShoppingCart key="s" size={16} />, "Purchasing"],
-    [<Receipt key="r" size={16} />, "Sales"], [<Wallet key="w" size={16} />, "Cash & Banks"], [<Calculator key="c" size={16} />, "Accounting & VAT"],
+    [<Receipt key="r" size={16} />, "Sales"], [<Boxes key="b" size={16} />, "Inventory"], [<ShoppingCart key="s" size={16} />, "Purchasing"],
+    [<Wallet key="w" size={16} />, "Cash & Banks"], [<Calculator key="c" size={16} />, "Accounting & VAT"], [<Factory key="f" size={16} />, "Production"],
     [<FileText key="fi" size={16} />, "Reports"], [<Users key="u" size={16} />, "Team & roles"],
   ];
   return (
@@ -250,16 +250,16 @@ function Features() {
   return (
     <section id="features" className="scroll-mt-24 px-4 py-24 sm:py-32">
       <div className="mx-auto max-w-6xl">
-        <SectionHead eyebrow="Features" title="Everything a factory runs on" text="One system for the whole cycle, so stock, costs and money always agree with each other." />
+        <SectionHead eyebrow="Features" title="Everything a business runs on" text="One system from buying to selling, so stock, costs and money always agree with each other." />
         <div className="mt-14 grid gap-5 md:grid-cols-6">
-          <Bento className="md:col-span-4" icon={<Factory size={18} />} title="Production" image="production"
-            points={["Bills of materials for each product", "Materials leave stock oldest batch first and move into work in progress", "Finished goods enter stock at their actual cost per unit", "Yield, over-usage and the supplier delivery behind every material"]} />
-          <Bento className="md:col-span-2" icon={<Boxes size={18} />} title="Inventory"
-            points={["Raw materials, packaging and finished goods", "Decimal quantities: kg, bags, litres", "Stock per branch, with transfers between them", "Stock counts, write-offs and a stock check"]} />
-          <Bento className="md:col-span-2" icon={<ShoppingCart size={18} />} title="Purchasing"
-            points={["Suppliers, deliveries and what you owe", "Pay now, part or on credit with a due date", "VAT on deliveries recorded as recoverable", "Returns to supplier, refunded or deducted"]} />
           <Bento className="md:col-span-4" icon={<Receipt size={18} />} title="Sales" image="invoice"
             points={["Invoices with discounts and VAT", "Deposits on customer orders, applied automatically", "Returns and credit notes, back into the right batches", "Customer statements with ageing"]} />
+          <Bento className="md:col-span-2" icon={<Boxes size={18} />} title="Inventory"
+            points={["Goods for sale, plus materials and packaging if you make things", "Decimal quantities: kg, bags, litres", "Stock per branch, with transfers between them", "Stock counts, write-offs and a stock check"]} />
+          <Bento className="md:col-span-2" icon={<ShoppingCart size={18} />} title="Purchasing"
+            points={["Suppliers, deliveries and what you owe", "Pay now, part or on credit with a due date", "VAT on deliveries recorded as recoverable", "Returns to supplier, refunded or deducted"]} />
+          <Bento className="md:col-span-4" icon={<Factory size={18} />} title="Production, if you make what you sell" image="production"
+            points={["A bill of materials (recipe) for each product", "Materials leave stock oldest batch first and move into work in progress", "Finished goods enter stock at their actual cost per unit", "Turn it off for shops: a store branch only receives and sells"]} />
           <Bento className="md:col-span-3" icon={<Calculator size={18} />} title="Accounting"
             points={["Double-entry ledger behind every transaction", "Profit & loss, balance sheet, trial balance, cash flow", "Several bank accounts and cash, with transfers", "VAT owed, VAT recoverable, set-off and payment"]} />
           <Bento className="md:col-span-3" icon={<Users size={18} />} title="Your team"
@@ -305,7 +305,7 @@ const SCREENS = [
   { key: "vat", label: "VAT", title: "VAT, worked out for you", text: "Output VAT on sales, input VAT on purchases, set-off and what you owe the tax office." },
   { key: "statement", label: "Statements", title: "Customer statements", text: "Every invoice, payment, deposit and credit with a running balance and ageing." },
   { key: "margins", label: "Margins", title: "Profit by product", text: "Sales after discounts against the actual cost of the batches each sale used." },
-  { key: "products", label: "Products", title: "Stock by type", text: "Raw materials, packaging and finished goods, with quantities and value at cost." },
+  { key: "products", label: "Products", title: "Stock by type", text: "Every product with its quantity and value at cost, by type and by branch." },
 ];
 
 function Showcase() {
@@ -350,15 +350,15 @@ function Showcase() {
 // ---------------------------------------------------------------- workflow
 function Workflow() {
   const steps = [
-    { icon: <Truck size={18} />, title: "Receive materials", text: "Record a delivery: paid, part-paid or on credit. Stock, the supplier balance and your bank update together." },
-    { icon: <Factory size={18} />, title: "Produce", text: "Start a run from the bill of materials. Materials move into work in progress; finished goods come out at their real cost." },
-    { icon: <Receipt size={18} />, title: "Sell", text: "Invoice finished goods with discounts and VAT. Take deposits on customer orders and they apply automatically." },
+    { icon: <Truck size={18} />, title: "Buy stock", text: "Record a delivery from a supplier: paid, part-paid or on credit. Stock, the supplier balance and your bank update together." },
+    { icon: <Factory size={18} />, title: "Make or move it", text: "Factories produce from a bill of materials at real cost. Stores receive goods by transfer, at the cost they were made or bought for." },
+    { icon: <Receipt size={18} />, title: "Sell", text: "Invoice with discounts and VAT. Take deposits on customer orders and they apply automatically." },
     { icon: <Wallet size={18} />, title: "Get paid, see profit", text: "Payments land in the right account, and profit, VAT and stock are up to date on the dashboard." },
   ];
   return (
     <section id="how" className="scroll-mt-24 px-4 py-24 sm:py-32">
       <div className="mx-auto max-w-6xl">
-        <SectionHead eyebrow="How it works" title="One flow, from delivery to profit" text="You record the day as it happens. Biz44 keeps stock, costs and accounts in step." />
+        <SectionHead eyebrow="How it works" title="One flow, from purchase to profit" text="You record the day as it happens. Biz44 keeps stock, costs and accounts in step." />
         <div className="relative mt-16 grid gap-5 md:grid-cols-4">
           <div className="absolute left-0 right-0 top-[38px] hidden h-px bg-gradient-to-r from-transparent via-border-strong to-transparent md:block" aria-hidden="true" />
           {steps.map((st, i) => (
@@ -384,7 +384,7 @@ function Trust() {
     { icon: <Layers size={18} />, title: "Real costs", text: "Stock is costed batch by batch, oldest first, so cost of sales and cost per unit reflect what you actually paid." },
     { icon: <PackageCheck size={18} />, title: "History is never rewritten", text: "Cancellations, returns and credit notes add reversing entries. Nothing is quietly edited or deleted." },
     { icon: <LockKeyhole size={18} />, title: "Your data is yours", text: "Each company's records are kept separate, and staff only see what their role and branches allow." },
-    { icon: <Building2 size={18} />, title: "Several branches", text: "Factory, depots and shops each keep their own stock, with transfers that keep the cost of every batch." },
+    { icon: <Building2 size={18} />, title: "Several branches", text: "Factories, warehouses and shops each keep their own stock, with transfers that keep the cost of every batch." },
     { icon: <ShieldCheck size={18} />, title: "Checked on every change", text: "An automated test suite runs the money and stock rules on every update to Biz44." },
   ];
   return (
@@ -474,7 +474,7 @@ function FinalCta() {
           <span aria-hidden="true" className="pointer-events-none absolute -bottom-32 -left-20 h-72 w-72 rounded-full bg-ivory/5 blur-3xl" />
           <h2 className="relative text-3xl font-bold tracking-tight sm:text-5xl">Set up your company</h2>
           <p className="relative mx-auto mt-4 max-w-xl text-lg opacity-75">
-            Create an account, add your products and bills of materials, and start recording deliveries, production and sales.
+            Create an account, add your branches and products, and start recording purchases, sales and payments.
           </p>
           <div className="relative mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link href="/auth/register" className={primaryBtn}>Create your company <ArrowRight size={16} /></Link>
@@ -494,7 +494,7 @@ function Footer() {
           <Logo />
           <div>
             <p className="font-bold">Biz44</p>
-            <p className="text-sm text-ink-soft">Production, stock, sales and accounting in one place.</p>
+            <p className="text-sm text-ink-soft">Sales, stock, purchasing and accounting in one place.</p>
           </div>
         </div>
         <nav className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-ink-soft">
@@ -503,6 +503,8 @@ function Footer() {
           <a href="#how" className="hover:text-ink">How it works</a>
           <Link href="/auth/login" className="hover:text-ink">Sign in</Link>
           <Link href="/auth/register" className="hover:text-ink">Create account</Link>
+          <Link href="/privacy" className="hover:text-ink">Privacy</Link>
+          <Link href="/terms" className="hover:text-ink">Terms</Link>
         </nav>
       </div>
       <p className="mx-auto mt-8 max-w-6xl text-center text-xs text-ink-faint sm:text-left">© {new Date().getFullYear()} Biz44</p>

@@ -4,6 +4,13 @@ import { authenticate } from '../../middleware/auth';
 import { prisma } from '../../lib/prisma';
 const router = Router();
 
+const KINDS = ['factory', 'store'] as const;
+/** "factory" or "store"; undefined when not sent; null when invalid. */
+function parseKind(value: unknown): 'factory' | 'store' | undefined | null {
+  if (value === undefined || value === null || value === '') return undefined;
+  return (KINDS as readonly unknown[]).includes(value) ? (value as 'factory' | 'store') : null;
+}
+
 router.use(authenticate);
 
 // ---------- LIST ----------
@@ -32,10 +39,14 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.user!.id;
     const { name, city, address, phone, email } = req.body;
 
-    if (!name) return res.status(400).json({ success: false, message: 'Name required' });
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ success: false, message: 'Name required' });
+    }
+    const kind = parseKind(req.body.kind);
+    if (kind === null) return res.status(400).json({ success: false, message: 'Choose Factory or Store' });
 
     const location = await prisma.location.create({
-      data: { companyId, name, city, address, phone, email },
+      data: { companyId, name: name.trim(), city, address, phone, email, kind: kind ?? 'factory' },
     });
 
     // Grant the creating user access
@@ -61,6 +72,21 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
     if (!location) return res.status(404).json({ success: false, message: 'Not found' });
 
     const { name, city, address, phone, email, status } = req.body;
+    const kind = parseKind(req.body.kind);
+    if (kind === null) return res.status(400).json({ success: false, message: 'Choose Factory or Store' });
+
+    // A factory can become a store only once it has no production under way.
+    if (kind === 'store' && location.kind !== 'store') {
+      const open = await prisma.productionOrder.count({
+        where: { companyId, locationId: location.id, status: { in: ['draft', 'in_progress'] } },
+      });
+      if (open > 0) {
+        return res.status(400).json({
+          success: false,
+          message: `${location.name} has ${open} production order${open === 1 ? '' : 's'} planned or running. Complete or cancel ${open === 1 ? 'it' : 'them'} before making it a store.`,
+        });
+      }
+    }
 
     const updated = await prisma.location.update({
       where: { id: location.id },
@@ -71,6 +97,7 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
         ...(phone !== undefined && { phone }),
         ...(email !== undefined && { email }),
         ...(status !== undefined && { status }),
+        ...(kind !== undefined && { kind }),
       },
     });
 
