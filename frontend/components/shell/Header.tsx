@@ -186,15 +186,18 @@ function CompanySwitcher({ roomy = true }: { roomy?: boolean }) {
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-zinc-700 to-zinc-900 text-[11px] font-bold text-white">
         {company.split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase()}
       </span>
-      <span className="hidden min-w-0 flex-1 text-left leading-tight sm:block">
+      <span className="hidden min-w-0 flex-1 text-center leading-tight sm:block">
         <span className="block truncate text-sm font-bold text-ink">{company}</span>
-        <span className="flex items-center gap-1 text-xs text-ink-soft"><MapPin size={11} className="shrink-0" /><span className="truncate">{branch}{activeLocation?.kind === "store" ? " · store" : ""}</span></span>
+        <span className="flex items-center justify-center gap-1 text-xs text-ink-soft"><MapPin size={11} className="shrink-0" /><span className="truncate">{branch}{activeLocation?.kind === "store" ? " · store" : ""}</span></span>
       </span>
-      {locations.length > 1 && <ChevronDown size={15} className="hidden text-ink-faint sm:block" />}
+      {/* Same width as the initials on the left, so the name sits in the centre. */}
+      <span className="hidden w-8 shrink-0 items-center justify-center text-ink-faint sm:flex" aria-hidden="true">
+        {locations.length > 1 && <ChevronDown size={15} />}
+      </span>
     </>
   );
   const cls = cn(
-    "flex h-10 items-center gap-2.5 rounded-full py-1 pl-1 pr-1 sm:w-56 sm:pr-4 lg:w-64",
+    "flex h-10 items-center gap-2.5 rounded-full py-1 pl-1 pr-1 sm:w-56 lg:w-64",
     roomy ? "xl:w-80" : "2xl:w-80"
   );
   if (locations.length <= 1) return <div className={cls}>{content}</div>;
