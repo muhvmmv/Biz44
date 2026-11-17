@@ -9,6 +9,7 @@ import {
 import { ChevronDown, ChevronLeft, ChevronRight, LogOut, Moon, Search, Sun } from "lucide-react";
 import { NavItem, NavLeaf, matchNav, visibleNav } from "@/lib/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { useLocation } from "@/hooks/useLocation";
 import { useTheme } from "@/hooks/useTheme";
 import { navBadges, useAlerts } from "@/hooks/useAlerts";
 import { ROLE_LABELS } from "@/lib/permissions";
@@ -38,7 +39,8 @@ export const PANEL_WIDTH = 284;
  */
 export default function Sidebar({ pathname, collapsed, onToggleCollapsed, mobileOpen, onCloseMobile, onOpenSearch }: SidebarProps) {
   const { user } = useAuth();
-  const nav = visibleNav(user?.permissions);
+  const { manufacturing } = useLocation();
+  const nav = visibleNav(user?.permissions, manufacturing);
   const active = matchNav(pathname);
   const badges = navBadges(useAlerts(pathname));
 

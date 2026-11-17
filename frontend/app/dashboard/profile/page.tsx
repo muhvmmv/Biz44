@@ -8,6 +8,7 @@ import Skeleton from "@/components/ui/Skeleton";
 import { Field, Input } from "@/components/ui/Input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { useAuth } from "@/hooks/useAuth";
+import DeleteAccount from "@/components/auth/DeleteAccount";
 
 function DetailsForm({ firstName: initialFirst, lastName: initialLast, email, role }: { firstName: string; lastName: string; email: string; role: string }) {
   const { refreshUser } = useAuth();
@@ -109,6 +110,7 @@ export default function ProfilePage() {
         <>
           <DetailsForm key={user.id} firstName={user.firstName} lastName={user.lastName} email={user.email} role={user.role} />
           <PasswordForm />
+          <DeleteAccount />
         </>
       )}
     </div>

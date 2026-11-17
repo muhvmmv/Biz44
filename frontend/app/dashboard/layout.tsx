@@ -10,7 +10,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ThemeProvider } from "@/hooks/useTheme";
 import Header from "@/components/shell/Header";
 import CommandPalette from "@/components/shell/CommandPalette";
-import { ChevronRight, Lock } from "lucide-react";
+import { ChevronRight, Lock, Store } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { breadcrumbs, pageAccess } from "@/lib/navigation";
 import { can } from "@/lib/permissions";
@@ -50,10 +50,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 /** Sidebar + header + page area, with ⌘K / Ctrl+K / "/" search. */
 function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { loading: locationLoading } = useLocation();
+  const { loading: locationLoading, manufacturing } = useLocation();
   const { user } = useAuth();
   const access = pageAccess(pathname);
   const allowed = !access || !user || can(user.permissions, access.area, access.need);
+  const factoryPage = !!access?.factoryOnly && !manufacturing;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   // This component only mounts in the browser (after sign-in), so reading
@@ -152,7 +153,16 @@ function AppShell({ children }: { children: React.ReactNode }) {
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
             >
-              {allowed ? children : (
+              {allowed && factoryPage ? (
+                <Card>
+                  <EmptyState
+                    icon={<Store size={22} />}
+                    title="This page is for factories"
+                    description="The branch you're viewing is a store. Stores receive stock from a factory and sell it. Switch to a factory branch, or to all branches, to see this page."
+                    action={<ButtonLink href="/dashboard" variant="outline">Go to dashboard</ButtonLink>}
+                  />
+                </Card>
+              ) : allowed ? children : (
                 <Card>
                   <EmptyState
                     icon={<Lock size={22} />}

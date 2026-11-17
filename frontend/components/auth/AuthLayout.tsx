@@ -70,7 +70,11 @@ function Shell({ children, title, subtitle, footer, shot = "dashboard", points }
           </motion.div>
         </div>
 
-        <p className="text-center text-xs text-ink-faint">© {new Date().getFullYear()} Biz44</p>
+        <p className="flex items-center justify-center gap-4 text-xs text-ink-faint">
+          <span>© {new Date().getFullYear()} Biz44</span>
+          <Link href="/privacy" className="hover:text-ink">Privacy</Link>
+          <Link href="/terms" className="hover:text-ink">Terms</Link>
+        </p>
       </div>
 
       {/* Showcase */}

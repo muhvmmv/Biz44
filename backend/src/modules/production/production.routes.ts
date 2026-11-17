@@ -21,6 +21,14 @@ router.param(
   )
 );
 
+/** Production happens at factories; stores only receive and sell. */
+async function requireFactory(companyId: string, locationId: string) {
+  const loc = await prisma.location.findFirst({ where: { id: locationId, companyId }, select: { name: true, kind: true } });
+  if (loc && loc.kind === 'store') {
+    throw badRequest(`${loc.name} is a store. Production orders are made at a factory branch.`);
+  }
+}
+
 const ok = (res: Response, data: unknown, status = 200) => res.status(status).json({ success: true, data });
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) =>
   (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
@@ -54,6 +62,7 @@ router.get('/orders/:orderId', wrap(async (req, res) => ok(res, await production
 router.post('/orders', resolveLocation, wrap(async (req, res) => {
   const companyId = req.user!.companyId;
   const locationId = requireTargetLocation(req);
+  await requireFactory(companyId, locationId);
   // A deposit (or full payment) taken with the order is money in: it needs
   // a role that records customer payments, and is checked before the order is saved.
   const deposit = req.body?.deposit;
@@ -74,6 +83,8 @@ router.put('/orders/:orderId', wrap(async (req, res) => {
   ok(res, await production.getOrder(req.user!.companyId, req.params.orderId));
 }));
 router.post('/orders/:orderId/start', wrap(async (req, res) => {
+  const o = await prisma.productionOrder.findFirst({ where: { id: req.params.orderId, companyId: req.user!.companyId }, select: { locationId: true } });
+  if (o?.locationId) await requireFactory(req.user!.companyId, o.locationId);
   await production.startOrder(req.user!.companyId, req.params.orderId, req.user!.id, req.body?.quantities);
   ok(res, await production.getOrder(req.user!.companyId, req.params.orderId));
 }));

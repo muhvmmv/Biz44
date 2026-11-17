@@ -115,7 +115,7 @@ function compact(symbol: string, v: number) {
 export default function DashboardPage() {
   const { user } = useAuth();
   const { format, currency } = useCurrency();
-  const { activeLocation, locations, activeLocationId } = useLocation();
+  const { activeLocation, locations, activeLocationId, manufacturing } = useLocation();
   const version = useLocationVersion();
   const perms = user?.permissions;
   const canMoney = can(perms, "money");
@@ -239,9 +239,13 @@ export default function DashboardPage() {
           {/* ---------- Operations ---------- */}
           <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
             {canInventory && summary.inventoryByStage && (
-              <motion.div variants={rise}><InventoryByStage stages={summary.inventoryByStage} format={format} /></motion.div>
+              <motion.div variants={rise}>
+                {manufacturing
+                  ? <InventoryByStage stages={summary.inventoryByStage} format={format} />
+                  : <StoreStock stages={summary.inventoryByStage} format={format} />}
+              </motion.div>
             )}
-            {canInventory && summary.production && (
+            {manufacturing && canInventory && summary.production && (
               <motion.div variants={rise}><ProductionThisMonth production={summary.production} format={format} /></motion.div>
             )}
             {canSales && (
@@ -564,6 +568,23 @@ function NeedsAttention({ summary, format }: { summary: Summary; format: (n: num
             </Link>
           </motion.div>
         ))}
+      </div>
+    </Panel>
+  );
+}
+
+/** A store keeps goods to sell and receives them from a factory. */
+function StoreStock({ stages, format }: { stages: { raw: number; wip: number; finished: number }; format: (n: number) => string }) {
+  const total = stages.raw + stages.wip + stages.finished;
+  return (
+    <Panel className="flex h-full flex-col">
+      <PanelHead title="Stock at this store" href="/dashboard/inventory/products" />
+      <p className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Value at cost</p>
+      <p className="mt-1 text-2xl font-bold tracking-tight text-ink"><CountUp value={total} format={format} /></p>
+      <p className="mt-3 text-sm text-ink-soft">Stores receive goods from a factory and sell them. Each transfer brings the goods in at the cost they were made for.</p>
+      <div className="mt-auto flex flex-wrap gap-2 pt-5">
+        <Link href="/dashboard/inventory/transfers?new=1" className="rounded-full bg-charcoal px-4 py-2 text-xs font-semibold text-ivory transition-transform hover:-translate-y-0.5">Receive stock</Link>
+        <Link href="/dashboard/inventory/transfers" className="rounded-full border border-border-soft px-4 py-2 text-xs font-semibold text-ink hover:bg-surface-muted">Past transfers</Link>
       </div>
     </Panel>
   );

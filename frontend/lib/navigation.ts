@@ -18,6 +18,8 @@ export interface NavLeaf {
   need?: Access;
   /** Extra words the search palette should match. */
   keywords?: string[];
+  /** Only for factories: hidden while a store branch is selected. */
+  factoryOnly?: boolean;
 }
 
 export interface NavItem {
@@ -30,6 +32,8 @@ export interface NavItem {
   href?: string;
   children?: NavLeaf[];
   keywords?: string[];
+  /** Only for factories: hidden while a store branch is selected. */
+  factoryOnly?: boolean;
 }
 
 export interface NavSection {
@@ -58,7 +62,7 @@ export const NAV: NavSection[] = [
       },
       {
         name: "Purchasing",
-        icon: ShoppingCart, tint: "from-amber-300 to-amber-500",
+        icon: ShoppingCart, tint: "from-amber-300 to-amber-500", factoryOnly: true,
         children: [
           { name: "Purchases", href: "/dashboard/purchases", area: "purchasing", keywords: ["orders", "bills"] },
           { name: "Receive goods", href: "/dashboard/inventory/receive", area: "purchasing", need: "write", keywords: ["receive inventory", "delivery"] },
@@ -68,7 +72,7 @@ export const NAV: NavSection[] = [
       },
       {
         name: "Production",
-        icon: Factory, tint: "from-violet-400 to-purple-600",
+        icon: Factory, tint: "from-violet-400 to-purple-600", factoryOnly: true,
         children: [
           { name: "Production orders", href: "/dashboard/production", area: "inventory", keywords: ["manufacturing", "make", "batch", "run", "mo"] },
           { name: "Bills of materials", href: "/dashboard/production/boms", area: "inventory", keywords: ["bom", "recipe", "formula", "materials"] },
@@ -123,7 +127,7 @@ export const NAV: NavSection[] = [
         icon: Settings, tint: "from-zinc-400 to-zinc-600",
         children: [
           { name: "Company", href: "/dashboard/settings", area: "settings", need: "write", keywords: ["currency", "business"] },
-          { name: "Locations", href: "/dashboard/settings/locations", area: "settings", need: "write", keywords: ["branches", "factory", "stores"] },
+          { name: "Branches", href: "/dashboard/settings/locations", area: "settings", need: "write", keywords: ["locations", "factory", "stores"] },
           { name: "Team", href: "/dashboard/settings/team", area: "settings", need: "write", keywords: ["users", "staff accounts", "roles", "permissions", "invite"] },
         ],
       },
@@ -131,13 +135,19 @@ export const NAV: NavSection[] = [
   },
 ];
 
-/** The navigation a user with these permissions can use: hidden leaves, and groups left empty, are dropped. */
-export function visibleNav(permissions: Permissions | undefined): NavSection[] {
+/**
+ * The navigation a user with these permissions can use: hidden leaves, and
+ * groups left empty, are dropped. With manufacturing off (a store branch is
+ * selected) the factory-only pages are dropped too.
+ */
+export function visibleNav(permissions: Permissions | undefined, manufacturing = true): NavSection[] {
+  const shown = (e: { area?: Area; need?: Access; factoryOnly?: boolean }) =>
+    can(permissions, e.area, e.need) && (manufacturing || !e.factoryOnly);
   return NAV.map((section) => ({
     ...section,
     items: section.items
-      .filter((item) => can(permissions, item.area, item.need))
-      .map((item) => (item.children ? { ...item, children: item.children.filter((c) => can(permissions, c.area, c.need)) } : item))
+      .filter(shown)
+      .map((item) => (item.children ? { ...item, children: item.children.filter(shown) } : item))
       .filter((item) => !item.children || item.children.length > 0),
   })).filter((section) => section.items.length > 0);
 }
@@ -150,9 +160,9 @@ export interface NavMatch {
 }
 
 /** Every navigable page, flattened. */
-export function allPages(permissions?: Permissions): NavMatch[] {
+export function allPages(permissions?: Permissions, manufacturing = true): NavMatch[] {
   const out: NavMatch[] = [];
-  for (const section of permissions ? visibleNav(permissions) : NAV) {
+  for (const section of permissions ? visibleNav(permissions, manufacturing) : NAV) {
     for (const item of section.items) {
       if (item.href) out.push({ section: section.label, item, href: item.href });
       for (const leaf of item.children ?? []) out.push({ section: section.label, item, leaf, href: leaf.href });
@@ -178,13 +188,13 @@ export function matchNav(pathname: string): NavMatch | undefined {
  * What a page needs: the area of its menu entry (or of its parent page), and
  * "write" for create pages ("/new") and pages marked as changing data.
  */
-export function pageAccess(pathname: string): { area: Area; need: Access } | undefined {
+export function pageAccess(pathname: string): { area: Area; need: Access; factoryOnly: boolean } | undefined {
   const m = matchNav(pathname);
   if (!m) return undefined;
   const area = m.leaf?.area ?? m.item.area;
   if (!area) return undefined;
   const need: Access = /\/new(\/|$)/.test(pathname) ? "write" : (m.leaf?.need ?? m.item.need ?? "read");
-  return { area, need };
+  return { area, need, factoryOnly: !!(m.item.factoryOnly || m.leaf?.factoryOnly) };
 }
 
 /** Breadcrumb trail for a path, e.g. ["Purchasing", "Suppliers", "Details"]. */

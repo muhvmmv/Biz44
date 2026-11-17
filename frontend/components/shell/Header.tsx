@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import {
-  Menu, Plus, Bell, ChevronDown, MapPin, Check, Settings, LogOut, UserRound, Users, Building2, AlertTriangle, AlertCircle, Info, Factory, ShoppingBag,
+  Menu, Plus, Bell, ChevronDown, MapPin, Check, Settings, LogOut, UserRound, Users, Building2, AlertTriangle, AlertCircle, Info, Factory, ShoppingBag, PackagePlus, Store,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useAlerts } from "@/hooks/useAlerts";
@@ -29,6 +29,8 @@ export default function Header({
 }) {
   const { user } = useAuth();
   const canProduce = can(user?.permissions, "inventory", "write");
+  // At a store the first button receives stock from a factory instead.
+  const { manufacturing } = useLocation();
   const canSell = can(user?.permissions, "sales", "write");
 
   return (
@@ -44,17 +46,17 @@ export default function Header({
       <div className="flex shrink-0 items-center gap-1 rounded-full border border-border-soft bg-surface/85 p-1 shadow-card">
         {canProduce && (
           <Link
-            href="/dashboard/production/new"
-            aria-label="New production order"
-            title="New production order"
+            href={manufacturing ? "/dashboard/production/new" : "/dashboard/inventory/transfers?new=1"}
+            aria-label={manufacturing ? "New production order" : "Receive stock from a factory"}
+            title={manufacturing ? "New production order" : "Receive stock from a factory"}
             className={cn(
               "group relative flex h-10 w-10 shrink-0 items-center justify-center gap-2 overflow-hidden whitespace-nowrap rounded-full text-sm font-bold lg:w-36 bg-gradient-to-br from-orange-400 via-orange-500 to-orange-600 text-white shadow-[0_6px_16px_-6px_rgb(240_90_40/0.65)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_22px_-6px_rgb(240_90_40/0.75)]",
               roomy ? "xl:w-40" : "2xl:w-40"
             )}
           >
             <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-700 group-hover:translate-x-full" aria-hidden="true" />
-            <Factory size={16} className="shrink-0" />
-            <span className="hidden lg:inline">{roomy ? "Production order" : "Production"}</span>
+            {manufacturing ? <Factory size={16} className="shrink-0" /> : <PackagePlus size={16} className="shrink-0" />}
+            <span className="hidden lg:inline">{manufacturing ? (roomy ? "Production order" : "Production") : (roomy ? "Receive stock" : "Receive")}</span>
           </Link>
         )}
         <CompanySwitcher roomy={roomy} />
@@ -85,7 +87,8 @@ export default function Header({
 
 function QuickCreate() {
   const { user } = useAuth();
-  const actions = QUICK_ACTIONS.filter((a) => can(user?.permissions, a.area, "write"));
+  const { manufacturing } = useLocation();
+  const actions = QUICK_ACTIONS.filter((a) => can(user?.permissions, a.area, "write") && (manufacturing || !a.factoryOnly));
   if (actions.length === 0) return null;
   return (
     <DropdownMenu
@@ -185,7 +188,7 @@ function CompanySwitcher({ roomy = true }: { roomy?: boolean }) {
       </span>
       <span className="hidden min-w-0 flex-1 text-left leading-tight sm:block">
         <span className="block truncate text-sm font-bold text-ink">{company}</span>
-        <span className="flex items-center gap-1 text-xs text-ink-soft"><MapPin size={11} className="shrink-0" /><span className="truncate">{branch}</span></span>
+        <span className="flex items-center gap-1 text-xs text-ink-soft"><MapPin size={11} className="shrink-0" /><span className="truncate">{branch}{activeLocation?.kind === "store" ? " · store" : ""}</span></span>
       </span>
       {locations.length > 1 && <ChevronDown size={15} className="hidden text-ink-faint sm:block" />}
     </>
@@ -212,10 +215,10 @@ function CompanySwitcher({ roomy = true }: { roomy?: boolean }) {
           </MenuButton>
           {locations.map((l) => (
             <MenuButton key={l.id} onClick={() => { setActiveLocation(l.id); close(); }}>
-              <MapPin size={15} />
+              {l.kind === "store" ? <Store size={15} /> : <Factory size={15} />}
               <span className="flex-1 min-w-0">
                 <span className="block truncate">{l.name}</span>
-                {l.city && <span className="block text-xs text-ink-soft">{l.city}</span>}
+                <span className="block text-xs text-ink-soft">{l.kind === "store" ? "Store" : "Factory"}{l.city ? ` · ${l.city}` : ""}</span>
               </span>
               {activeLocationId === l.id && <Check size={15} className="!text-ink" />}
             </MenuButton>

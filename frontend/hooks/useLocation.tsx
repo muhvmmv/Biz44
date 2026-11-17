@@ -11,6 +11,8 @@ export interface Location {
   name: string;
   city: string | null;
   status: string;
+  /** "factory" makes products; "store" receives stock and sells. */
+  kind?: "factory" | "store";
 }
 
 interface LocationContextType {
@@ -20,6 +22,12 @@ interface LocationContextType {
   setActiveLocation: (id: string) => void;
   refresh: () => Promise<void>;
   loading: boolean;
+  /**
+   * Whether manufacturing (production, raw materials, purchasing) applies to
+   * what is on screen: the selected branch is a factory, or "all branches"
+   * includes at least one factory.
+   */
+  manufacturing: boolean;
 }
 
 const STORAGE_KEY = "biz44_active_location";
@@ -91,6 +99,10 @@ export function LocationProvider({ children }: { children: ReactNode }) {
       ? null
       : locations.find((l) => l.id === activeLocationId) || null;
 
+  const manufacturing = activeLocation
+    ? activeLocation.kind !== "store"
+    : locations.length === 0 || locations.some((l) => l.kind !== "store");
+
   return (
     <LocationContext.Provider
       value={{
@@ -100,6 +112,7 @@ export function LocationProvider({ children }: { children: ReactNode }) {
         setActiveLocation,
         refresh: loadLocations,
         loading,
+        manufacturing,
       }}
     >
       {children}

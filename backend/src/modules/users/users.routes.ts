@@ -50,7 +50,7 @@ async function companyLocations(companyId: string, value: unknown) {
 
 /** Refuse a change that would leave the company without an active administrator. */
 async function keepAnAdmin(companyId: string, userId: string, next: { role?: string; isActive?: boolean }) {
-  const user = await prisma.user.findFirst({ where: { id: userId, companyId } });
+  const user = await prisma.user.findFirst({ where: { id: userId, companyId, deletedAt: null } });
   if (!user) throw notFound('User not found');
   const stillAdmin = (next.role ?? user.role) === 'admin' && (next.isActive ?? user.isActive);
   if (user.role === 'admin' && user.isActive && !stillAdmin) {
@@ -70,7 +70,7 @@ router.get('/roles', (req: Request, res: Response) => {
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const users = await prisma.user.findMany({
-      where: { companyId: req.user!.companyId },
+      where: { companyId: req.user!.companyId, deletedAt: null },
       include,
       orderBy: [{ isActive: 'desc' }, { firstName: 'asc' }],
     });
@@ -139,7 +139,7 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
 // Set a new password for a staff member who has forgotten theirs.
 router.post('/:id/password', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const user = await prisma.user.findFirst({ where: { id: req.params.id, companyId: req.user!.companyId } });
+    const user = await prisma.user.findFirst({ where: { id: req.params.id, companyId: req.user!.companyId, deletedAt: null } });
     if (!user) throw notFound('User not found');
     const password = checkPassword(req.body?.password);
     await prisma.user.update({ where: { id: user.id }, data: { password: await bcrypt.hash(password, 12) } });
